@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>games</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:system-ui,-apple-system,sans-serif;line-height:1.4;padding:2rem}
+header{max-width:1200px;margin:0 auto 2rem;display:flex;flex-direction:column;gap:1rem}
+h1{font-size:1.5rem;font-weight:400;letter-spacing:.05em;text-transform:lowercase}
+.sub{font-size:.75rem;color:#666}
+input{background:#000;color:#fff;border:1px solid #fff;padding:.6rem 1rem;font-size:.9rem;outline:none;width:100%;max-width:400px}
+input::placeholder{color:#888}
+#count{font-size:.8rem;color:#888}
+main{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.5rem}
+.game{background:#111;display:block;text-decoration:none;color:inherit;transition:transform .1s,background .1s;cursor:pointer;border-radius:4px;overflow:hidden}
+.game:hover{background:#1a1a1a;transform:translateY(-2px)}
+.game img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block}
+.info{padding:.6rem 1rem}
+.title{font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty{grid-column:1/-1;padding:3rem;text-align:center;font-size:.85rem;color:#888}
+</style>
+</head>
+<body>
+<header>
+<h1>games <span class="sub">little amount of games since we only put higher quality things here</span></h1>
+<input type="text" id="search" placeholder="search..." autocomplete="off">
+<div id="count"></div>
+</header>
+<main id="grid"><div class="empty">loading...</div></main>
+
+<script>
+const GAMES_URL = 'https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games.js';
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function render(list) {
+  const grid = document.getElementById('grid');
+  const count = document.getElementById('count');
+  count.textContent = list.length + ' game' + (list.length !== 1 ? 's' : '');
+  if (!list.length) { grid.innerHTML = '<div class="empty">no results</div>'; return; }
+  grid.innerHTML = list.map((g, i) => `<div class="game" data-i="${i}">
+    <img src="${g.image}" alt="" loading="lazy">
+    <div class="info">
+      <div class="title">${esc(g.title)}</div>
+    </div>
+  </div>`).join('');
+
+  document.querySelectorAll('.game').forEach(el => {
+    el.addEventListener('click', () => {
+      const g = list[el.dataset.i];
+      fetch(g.url).then(r => r.text()).then(html => {
+        const blob = new Blob([html], {type: 'text/html'});
+        window.open(URL.createObjectURL(blob), '_blank');
+      });
+    });
+  });
+}
+
+async function load() {
+  try {
+    const res = await fetch(GAMES_URL);
+    const text = await res.text();
+    const clean = text.replace(/^const\s+games\s*=\s*/, '').trim().replace(/;+$/, '');
+    const games = new Function('return ' + clean)();
+
+    document.getElementById('search').addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      render(games.filter(g => (g.title || '').toLowerCase().includes(q) || (g.desc || '').toLowerCase().includes(q)));
+    });
+
+    render(games);
+  } catch (err) {
+    document.getElementById('grid').innerHTML = '<div class="empty">error loading games</div>';
+    console.error(err);
+  }
+}
+
+load();
+</script>
+</body>
+</html>
