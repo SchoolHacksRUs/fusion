@@ -1,19 +1,9 @@
-<div id="fusion-host"></div>
+<iframe id="fusion" style="width:100%;height:600px;border:0;"></iframe>
 <script>
-(function(){
-  var host = document.getElementById('fusion-host');
-  var iframe = document.createElement('iframe');
-  iframe.style.cssText = 'width:100%;height:90vh;border:none;display:block;';
-  host.appendChild(iframe);
-  
-  fetch('https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/index.html')
-    .then(function(r){ return r.text(); })
-    .then(function(html){
-      var blob = new Blob([html], {type:'text/html'});
-      iframe.src = URL.createObjectURL(blob);
-    })
-    .catch(function(){
-      host.innerHTML = '<p style="color:#888;text-align:center;padding:2rem;font-family:sans-serif;">Unable to load games. Please check your connection.</p>';
-    });
-})();
+fetch('https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/index.html')
+  .then(r => r.text())
+  .then(html => {
+    const blob = new Blob([html], {type: 'text/html'});
+    document.getElementById('fusion').src = URL.createObjectURL(blob);
+  });
 </script>
