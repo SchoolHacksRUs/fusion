@@ -13,6 +13,30 @@ h1{font-size:1.5rem;font-weight:400;letter-spacing:.05em;text-transform:lowercas
 input{background:#000;color:#fff;border:1px solid #fff;padding:.6rem 1rem;font-size:.9rem;outline:none;width:100%;max-width:400px}
 input::placeholder{color:#888}
 #count{font-size:.8rem;color:#888}
+
+/* credits strip */
+#credits-wrap{max-width:1200px;margin:0 auto 1.5rem}
+#credits-label{font-size:.65rem;text-transform:uppercase;letter-spacing:.15em;color:#555;margin-bottom:.5rem}
+#credits{display:flex;gap:.6rem;overflow-x:auto;padding-bottom:.4rem;scrollbar-width:none}
+#credits::-webkit-scrollbar{display:none}
+.credit{flex-shrink:0;display:flex;align-items:center;gap:.5rem;background:#111;border:1px solid #222;padding:.35rem .7rem .35rem .35rem;border-radius:999px;text-decoration:none;color:#fff;font-size:.8rem;transition:background .15s,border-color .15s;cursor:pointer}
+.credit:hover{background:#1a1a1a;border-color:#444}
+.credit img{width:26px;height:26px;border-radius:50%;object-fit:cover}
+
+/* credits modal */
+#cred-modal{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(6px);display:none;align-items:center;justify-content:center;z-index:999;padding:2rem}
+#cred-modal.active{display:flex}
+#cred-box{background:#0a0a0a;border:1px solid #222;border-radius:8px;max-width:700px;width:100%;max-height:80vh;overflow-y:auto;padding:1.5rem;position:relative}
+#cred-box h2{font-size:1.1rem;font-weight:400;margin-bottom:1rem;text-transform:lowercase;letter-spacing:.05em}
+#cred-close{position:absolute;top:1rem;right:1rem;background:none;border:none;color:#888;font-size:1.2rem;cursor:pointer;line-height:1}
+#cred-close:hover{color:#fff}
+#cred-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:1rem}
+.cred-card{display:flex;flex-direction:column;align-items:center;gap:.5rem;text-decoration:none;color:#fff;background:#111;border:1px solid #1a1a1a;border-radius:6px;padding:1rem;transition:background .15s,border-color .15s}
+.cred-card:hover{background:#161616;border-color:#333}
+.cred-card img{width:56px;height:56px;border-radius:50%;object-fit:cover}
+.cred-card .cname{font-size:.8rem;font-weight:500;text-align:center}
+.cred-card .chandle{font-size:.7rem;color:#666;text-align:center}
+
 main{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.5rem}
 .game{background:#111;display:block;text-decoration:none;color:inherit;transition:transform .1s,background .1s;cursor:pointer;border-radius:4px;overflow:hidden}
 .game:hover{background:#1a1a1a;transform:translateY(-2px)}
@@ -24,16 +48,64 @@ main{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(au
 </head>
 <body>
 <header>
-<h1>skid.rip <span class="sub">everything stolen from other sites</span></h1>
+<h1>webport.rip <span class="sub">everything stolen from other sites</span></h1>
 <input type="text" id="search" placeholder="search..." autocomplete="off">
 <div id="count"></div>
 </header>
+
+<div id="credits-wrap">
+  <div id="credits-label">credits <span style="color:#333;cursor:pointer" onclick="openCred()">(view all)</span></div>
+  <div id="credits"></div>
+</div>
+
+<div id="cred-modal" onclick="if(event.target===this)closeCred()">
+  <div id="cred-box">
+    <button id="cred-close" onclick="closeCred()">&times;</button>
+    <h2>the people who made this possible</h2>
+    <div id="cred-grid"></div>
+  </div>
+</div>
+
 <main id="grid"><div class="empty">loading...</div></main>
 
 <script>
 const GAMES_URL = 'https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games.js';
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const credits = [
+  {u:'reeyuki',n:'Reeyuki',a:'https://avatars.githubusercontent.com/u/160347604?v=4'},
+  {u:'slqntdevss',n:'slqnt',a:'https://avatars.githubusercontent.com/u/94934670?v=4'},
+  {u:'zx8s',n:'zxs',a:'https://avatars.githubusercontent.com/u/214947125?v=4'},
+  {u:'dashiellbenton',n:'Dashiell Benton',a:'https://avatars.githubusercontent.com/u/141685401?v=4'},
+  {u:'x8rr',n:'hvtrs',a:'https://avatars.githubusercontent.com/u/159058655?v=4'},
+  {u:'gurtmuncher',n:'gurtmuncher',a:'https://avatars.githubusercontent.com/u/216251280?v=4'},
+  {u:'a1pl',n:'sunsuke',a:'https://avatars.githubusercontent.com/u/157911417?v=4'},
+  {u:'SomeRandomFella',n:'plankton',a:'https://avatars.githubusercontent.com/u/182822507?v=4'},
+  {u:'q8j-dev',n:'q8j.',a:'https://avatars.githubusercontent.com/u/156719351?v=4'},
+  {u:'NotRexed',n:'NotRexed',a:'https://avatars.githubusercontent.com/u/179062254?v=4'},
+  {u:'cirsius',n:'Cirsius',a:'https://avatars.githubusercontent.com/u/183772380?v=4'},
+  {u:'woahhcrackers',n:'crackers',a:'https://avatars.githubusercontent.com/u/197678099?v=4'},
+  {u:'shayderrr',n:'shayder',a:'https://avatars.githubusercontent.com/u/149444489?v=4'}
+];
+
+function renderCredits(){
+  const strip = document.getElementById('credits');
+  strip.innerHTML = credits.map(c => `<a class="credit" href="https://github.com/${c.u}" target="_blank" rel="noopener">
+    <img src="${c.a}" alt="" loading="lazy"><span>${esc(c.n)}</span>
+  </a>`).join('');
+
+  const grid = document.getElementById('cred-grid');
+  grid.innerHTML = credits.map(c => `<a class="cred-card" href="https://github.com/${c.u}" target="_blank" rel="noopener">
+    <img src="${c.a}" alt="" loading="lazy">
+    <div class="cname">${esc(c.n)}</div>
+    <div class="chandle">@${c.u}</div>
+  </a>`).join('');
+}
+
+function openCred(){document.getElementById('cred-modal').classList.add('active');}
+function closeCred(){document.getElementById('cred-modal').classList.remove('active');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCred();});
 
 function render(list) {
   const grid = document.getElementById('grid');
@@ -70,6 +142,7 @@ async function load() {
       render(games.filter(g => (g.title || '').toLowerCase().includes(q) || (g.desc || '').toLowerCase().includes(q)));
     });
 
+    renderCredits();
     render(games);
   } catch (err) {
     document.getElementById('grid').innerHTML = '<div class="empty">error loading games</div>';
