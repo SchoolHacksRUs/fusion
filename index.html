@@ -122,10 +122,35 @@ function render(list) {
   document.querySelectorAll('.game').forEach(el => {
     el.addEventListener('click', () => {
       const g = list[el.dataset.i];
-      fetch(g.url).then(r => r.text()).then(html => {
-        const blob = new Blob([html], {type: 'text/html'});
-        window.open(URL.createObjectURL(blob), '_blank');
-      });
+      
+      // Open about:blank tab
+      const win = window.open('about:blank', '_blank');
+      if (!win) {
+        // Fallback if popup blocked
+        window.open(g.url, '_blank');
+        return;
+      }
+      
+      // Show loading message
+      win.document.title = g.title || 'Game';
+      win.document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#000;color:#fff;font-family:sans-serif;font-size:1.2rem;">Loading ${esc(g.title)}...</div>`;
+      
+      // Fetch the game HTML
+      fetch(g.url)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch game');
+          return res.text();
+        })
+        .then(html => {
+          // Write the HTML to the about:blank page
+          win.document.open();
+          win.document.write(html);
+          win.document.close();
+        })
+        .catch(err => {
+          win.document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#000;color:#ff4444;font-family:sans-serif;font-size:1.2rem;">Error loading game: ${esc(err.message)}</div>`;
+          console.error(err);
+        });
     });
   });
 }
