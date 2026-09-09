@@ -21,5 +21,6 @@ const games = [
       { title: "Paint The Town Red", desc: "A physics-based sandbox where you can experiment with various tools, weapons, and characters in a large open space", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/pttr.html", image: "https://github.com/SchoolHacksRUs/fusion/blob/main/images%20(1).jpeg?raw=true" },
       { title: "Inscryption (should be fixed)", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/Reeyuki/InscryptionWebport/refs/heads/main/index.html", image: "https://github.com/SchoolHacksRUs/fusion/blob/main/header.jpg?raw=true" },
       { title: "Boil Noodes At Night", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/boilnoodlesatnight.html", image: "https://github.com/SchoolHacksRUs/fusion/blob/main/download.jpeg?raw=true" },
+      { title: "Clover Pit", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/web-ports/clover-pit/refs/heads/main/index.html", image: "https://raw.githubusercontent.com/NoahsAmazingTutoringHelp/Noahs-Calculus-Tutor/refs/heads/master/images/343.jpg" },
 
 ];
