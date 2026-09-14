@@ -1,140 +1,283 @@
 <!DOCTYPE html>
 <html lang="en-us">
-  <head>
-    <base href="https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/">
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Unity Web Player | CloverPit</title>
-    <link rel="shortcut icon" href="TemplateData/favicon.ico">
-    <link rel="stylesheet" href="TemplateData/style.css">
-  </head>
-  <body>
-    <div id="loading-text"
-    style="color: white; font-size: 48px; font-family: cursive; text-align: center; margin-top: 20px;"> LOADING...
-  </div>
-    <div id="unity-container">
-      <canvas id="unity-canvas" width=960 height=540 tabindex="-1"></canvas>
-      <div id="unity-loading-bar">
-        <div id="unity-logo"></div>
-        <div id="unity-progress-bar-empty">
-          <div id="unity-progress-bar-full"></div>
-        </div>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>CloverPit · portable</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; }
+    html, body {
+      width: 100%; height: 100%;
+      margin: 0; padding: 0;
+      overflow: hidden;
+      background: #000;
+    }
+    #unity-container {
+      position: absolute;
+      inset: 0;
+    }
+    #unity-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+    #unity-loading-bar {
+      display: none;
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 11;
+    }
+    #unity-logo {
+      width: 154px; height: 130px;
+      background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 154 130"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-size="20" fill="%23fff">Unity</text></svg>') no-repeat center;
+    }
+    #unity-progress-bar-empty {
+      width: 141px; height: 18px;
+      margin: 10px auto 0 auto;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid #fff;
+      border-radius: 4px;
+    }
+    #unity-progress-bar-full {
+      width: 0%; height: 100%;
+      background: #fff;
+      border-radius: 3px;
+      transition: width 0.15s linear;
+    }
+    #unity-warning {
+      position: absolute;
+      left: 50%; top: 5%;
+      transform: translateX(-50%);
+      background: #f90;
+      padding: 10px;
+      display: none;
+      z-index: 12;
+    }
+    #loading-text {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      font-family: cursive;
+      font-weight: bold;
+      text-align: center;
+      white-space: nowrap;
+      background: linear-gradient(270deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #8f00ff);
+      background-size: 400% 400%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: rainbow 3s ease infinite;
+      z-index: 10;
+      letter-spacing: 3px;
+      pointer-events: none;
+      padding: 0 16px;
+    }
+    @keyframes rainbow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    #info-badge {
+      position: fixed;
+      bottom: 12px; right: 16px;
+      color: #444;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 20;
+      pointer-events: none;
+      background: rgba(0,0,0,0.4);
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid #2a2a2a;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading-text">LOADING... 0.00 MB / 86.96 MB</div>
+  <div id="unity-container">
+    <canvas id="unity-canvas" width="960" height="540" tabindex="-1"></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
       </div>
-      <div id="unity-warning"> </div>
     </div>
-    <script>
-      var loadingText = document.querySelector("#loading-text");
-    let totalBytes = 0;
-    let loadedBytes = 0;
+    <div id="unity-warning"></div>
+  </div>
+  <div id="info-badge">CloverPit · portable</div>
 
-    async function fetchWithProgress(url) {
-      const response = await fetch(url);
-      const reader = response.body.getReader();
-      let chunks = [];
-      let received = 0;
-      while (true) {
-        const {
-          done,
-          value
-        } = await reader.read();
-        if (done) break;
-        received += value.length;
-        loadedBytes += value.length;
-        chunks.push(value);
-        let mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
-        let mbTotal = '86.96';
-        loadingText.textContent = `LOADING... ${mbDone} MB / ${mbTotal} MB`;
+  <script>
+    (function() {
+      const loadingText = document.querySelector("#loading-text");
+
+      // -------------------------------------------------------------
+      //  jsDelivr CDN base (mirrors the GitHub repo, sends correct CORS
+      //  and MIME headers, no raw.githubusercontent text/plain problem)
+      // -------------------------------------------------------------
+      const REMOTE_BASE = "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/";
+      const TOTAL_EXPECTED_MB = 86.96;
+      let loadedBytes = 0;
+
+      // -------------------------------------------------------------
+      //  Fetch a single part, update progress, return ArrayBuffer
+      // -------------------------------------------------------------
+      async function fetchWithProgress(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received += value.length;
+          loadedBytes += value.length;
+          chunks.push(value);
+
+          const mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
+          loadingText.textContent = `LOADING... ${mbDone} MB / ${TOTAL_EXPECTED_MB} MB`;
+        }
+
+        const fullBuffer = new Uint8Array(received);
+        let offset = 0;
+        for (const chunk of chunks) {
+          fullBuffer.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return fullBuffer.buffer;
       }
-      let fullBuffer = new Uint8Array(received);
-      let offset = 0;
-      for (let chunk of chunks) {
-        fullBuffer.set(chunk, offset);
-        offset += chunk.length;
+
+      // -------------------------------------------------------------
+      //  Merge parts into a Blob with an explicit MIME type
+      // -------------------------------------------------------------
+      async function mergeFiles(partUrls, mimeType) {
+        const buffers = await Promise.all(partUrls.map(u => fetchWithProgress(u)));
+        const mergedBlob = new Blob(buffers, { type: mimeType });
+        return URL.createObjectURL(mergedBlob);
       }
-      return fullBuffer.buffer;
-    }
 
-    async function mergeFiles(fileParts, cacheKey) {
-      const buffers = await Promise.all(
-        fileParts.map(part => fetchWithProgress(part))
-      );
-      const mergedBlob = new Blob(buffers);
-      return URL.createObjectURL(mergedBlob);
-    }
-
-    function getParts(file, start, end) {
-      let parts = [];
-      for (let i = start; i <= end; i++) {
-        parts.push(file + ".part" + i);
+      function getPartUrls(baseName, start, end) {
+        const urls = [];
+        for (let i = start; i <= end; i++) {
+          urls.push(`${REMOTE_BASE}${baseName}.part${i}`);
+        }
+        return urls;
       }
-      return parts;
-    }
-    (async () => {
-      const [dataUrl, wasmUrl] = await Promise.all([
-        mergeFiles(getParts("Build/CloverPit.data", 1, 3), "CloverPit.data"),
-        mergeFiles(getParts("Build/CloverPit.wasm", 1, 3), "CloverPit.wasm"),
-      ]);
 
-      var container = document.querySelector("#unity-container");
-      var canvas = document.querySelector("#unity-canvas");
-      var loadingBar = document.querySelector("#unity-loading-bar");
-      var progressBarFull = document.querySelector("#unity-progress-bar-full");
-      var warningBanner = document.querySelector("#unity-warning");
+      // -------------------------------------------------------------
+      //  Fetch a remote JS file as a blob with correct MIME type
+      // -------------------------------------------------------------
+      async function loadScriptAsBlob(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+        const text = await response.text();
+        const blob = new Blob([text], { type: 'application/javascript' });
+        return URL.createObjectURL(blob);
+      }
 
-      // Shows a temporary message banner/ribbon for a few seconds, or
-      // a permanent error message on top of the canvas if type=='error'.
-      // If type=='warning', a yellow highlight color is used.
-      // Modify or remove this function to customize the visually presented
-      // way that non-critical warnings and error messages are presented to the
-      // user.
+      // -------------------------------------------------------------
+      //  Unity banner helper (silent, matches original behavior)
+      // -------------------------------------------------------------
       function unityShowBanner(msg, type) {
+        const warningBanner = document.querySelector("#unity-warning");
+        if (type === 'error') {
+          warningBanner.style.display = 'block';
+          warningBanner.textContent = msg;
+        } else {
+          warningBanner.style.display = 'block';
+          warningBanner.textContent = msg;
+          setTimeout(() => { warningBanner.style.display = 'none'; }, 3000);
+        }
       }
 
-      var buildUrl = "Build";
-      var loaderUrl = buildUrl + "/CloverPit.loader.js";
-      var config = {
-        arguments: [],
-        dataUrl: dataUrl,
-        frameworkUrl: buildUrl + "/CloverPit.framework.js",
-        codeUrl: wasmUrl,
-        streamingAssetsUrl: "StreamingAssets",
-        companyName: "Panik Arcade",
-        productName: "CloverPit",
-        productVersion: "1.3",
-        showBanner: unityShowBanner,
-      };
+      (async () => {
+        try {
+          // ---------------------------------------------------------
+          //  1) Download and merge data & wasm parts (3 parts each)
+          // ---------------------------------------------------------
+          const dataPartUrls = getPartUrls('Build/CloverPit.data', 1, 3);
+          const wasmPartUrls = getPartUrls('Build/CloverPit.wasm', 1, 3);
 
-      // By default Unity keeps WebGL canvas render target size matched with
-      // the DOM size of the canvas element (scaled by window.devicePixelRatio)
-      // Set this to false if you want to decouple this synchronization from
-      // happening inside the engine, and you would instead like to size up
-      // the canvas DOM size and WebGL render target sizes yourself.
-      // config.matchWebGLToCanvasSize = false;
+          const [dataUrl, wasmUrl] = await Promise.all([
+            mergeFiles(dataPartUrls, 'application/octet-stream'),
+            mergeFiles(wasmPartUrls, 'application/wasm'),
+          ]);
 
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        // Mobile device style: fill the whole browser client area with the game canvas:
-        var meta = document.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-        document.getElementsByTagName('head')[0].appendChild(meta);
-      }
+          // ---------------------------------------------------------
+          //  2) Mobile viewport fix
+          // ---------------------------------------------------------
+          if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+            const meta = document.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+            document.head.appendChild(meta);
+          }
 
+          const canvas = document.querySelector("#unity-canvas");
+          const loadingBar = document.querySelector("#unity-loading-bar");
+          const progressBarFull = document.querySelector("#unity-progress-bar-full");
 
-      loadingBar.style.display = "block";
+          loadingBar.style.display = "block";
 
-      var script = document.createElement("script");
-      script.src = loaderUrl;
-      script.onload = () => {
-        createUnityInstance(canvas, config, (progress) => {
-          progressBarFull.style.width = 100 * progress + "%";
-        }).then((unityInstance) => {
-          loadingBar.style.display = "none";
-          loadingText.remove();
-        }).catch((message) => {
-        });
-      };
-      document.body.appendChild(script);
+          // ---------------------------------------------------------
+          //  3) Load CloverPit.loader.js as a blob (correct MIME)
+          // ---------------------------------------------------------
+          if (typeof createUnityInstance !== 'function') {
+            const loaderBlobUrl = await loadScriptAsBlob(`${REMOTE_BASE}Build/CloverPit.loader.js`);
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = loaderBlobUrl;
+              script.onload = resolve;
+              script.onerror = () => reject(new Error('Failed to execute CloverPit.loader.js'));
+              document.head.appendChild(script);
+            });
+          }
+
+          // ---------------------------------------------------------
+          //  4) Pre-fetch framework JS as a blob (correct MIME)
+          // ---------------------------------------------------------
+          const frameworkBlobUrl = await loadScriptAsBlob(`${REMOTE_BASE}Build/CloverPit.framework.js`);
+
+          // ---------------------------------------------------------
+          //  5) Boot Unity
+          // ---------------------------------------------------------
+          const config = {
+            arguments: [],
+            dataUrl: dataUrl,
+            frameworkUrl: frameworkBlobUrl,
+            codeUrl: wasmUrl,
+            streamingAssetsUrl: `${REMOTE_BASE}StreamingAssets`,
+            companyName: "Panik Arcade",
+            productName: "CloverPit",
+            productVersion: "1.3",
+            showBanner: unityShowBanner,
+          };
+
+          createUnityInstance(canvas, config, (progress) => {
+            progressBarFull.style.width = (100 * progress) + "%";
+          }).then((unityInstance) => {
+            loadingBar.style.display = "none";
+            if (loadingText.parentNode) loadingText.remove();
+          }).catch((err) => {
+            console.error('Unity instance error:', err);
+            loadingText.textContent = 'ERROR: ' + (err.message || 'unknown');
+            loadingText.style.webkitTextFillColor = '#ff5555';
+            loadingText.style.color = '#ff5555';
+            loadingText.style.background = 'none';
+          });
+
+        } catch (err) {
+          console.error('Loading failed:', err);
+          loadingText.textContent = 'LOADING FAILED — see console';
+          loadingText.style.webkitTextFillColor = '#ff5555';
+          loadingText.style.color = '#ff5555';
+          loadingText.style.background = 'none';
+        }
+      })();
     })();
-    </script>
-  </body>
+  </script>
+</body>
 </html>
