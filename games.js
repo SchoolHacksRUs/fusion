@@ -22,5 +22,6 @@ const games = [
       { title: "Inscryption (should be fixed)", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/Reeyuki/InscryptionWebport/refs/heads/main/index.html", image: "https://github.com/SchoolHacksRUs/fusion/blob/main/header.jpg?raw=true" },
       { title: "Boil Noodes At Night", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/boilnoodlesatnight.html", image: "https://github.com/SchoolHacksRUs/fusion/blob/main/download.jpeg?raw=true" },
       { title: "Clover Pit", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/web-ports/clover-pit/refs/heads/main/index.html", image: "https://raw.githubusercontent.com/NoahsAmazingTutoringHelp/Noahs-Calculus-Tutor/refs/heads/master/images/343.jpg" },
+      { title: "Iron Lung", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/Ironlung.html", image: "https://raw.githubusercontent.com/NoahsAmazingTutoringHelp/Noahs-Calculus-Tutor/refs/heads/master/images/328.jpg" },
 
 ];
