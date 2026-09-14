@@ -1,131 +1,197 @@
 <!DOCTYPE html>
 <html lang="en-us">
-
 <head>
-  <base href="https://cdn.jsdelivr.net/gh/web-ports/iron-lung@main/">
   <meta charset="utf-8">
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>IRON LUNG</title>
+  <title>IRON LUNG · portable</title>
   <style>
-    html,
-    body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
+    * { box-sizing: border-box; user-select: none; }
+    html, body {
+      width: 100%; height: 100%;
+      margin: 0; padding: 0;
       overflow: hidden;
+      background: #000;
     }
-
     #unity-canvas {
-      width: 100%;
-      height: 100%;
-      background: #000000;
+      width: 100%; height: 100%;
       display: block;
+      background: #000;
     }
     #loading-text {
-  font-weight: bold;
-  background: linear-gradient(
-    270deg,
-    #ff0000,
-    #ff7f00,
-    #ffff00,
-    #00ff00,
-    #0000ff,
-    #4b0082,
-    #8f00ff
-  );
-  background-size: 400% 400%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: rainbow 3s ease infinite;
-}
-
-@keyframes rainbow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 52px;
+      font-family: 'Courier New', Courier, monospace;
+      font-weight: 900;
+      text-align: center;
+      white-space: nowrap;
+      background: linear-gradient(270deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #8f00ff);
+      background-size: 400% 400%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: rainbow 3s ease infinite;
+      z-index: 10;
+      letter-spacing: 4px;
+      pointer-events: none;
+      padding: 0 16px;
+    }
+    @keyframes rainbow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    #info-badge {
+      position: fixed;
+      bottom: 12px; right: 16px;
+      color: #444;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 20;
+      pointer-events: none;
+      background: rgba(0,0,0,0.4);
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid #2a2a2a;
+    }
   </style>
 </head>
-
 <body>
-  <div id="loading-text"
-    style="color: white; font-size: 48px; font-family: cursive; text-align: center; margin-top: 20px;"> LOADING...
-  </div>
+  <div id="loading-text">LOADING... 0.00 MB / 60.7 MB</div>
   <canvas id="unity-canvas"></canvas>
-  <script src="Build/built.loader.js"></script>
-  <script>var loadingText = document.querySelector("#loading-text");
-    let totalBytes = 0;
-    let loadedBytes = 0;
+  <div id="info-badge">IRON LUNG · portable</div>
 
-    async function fetchWithProgress(url) {
-      const response = await fetch(url);
-      const reader = response.body.getReader();
-      let chunks = [];
-      let received = 0;
-      while (true) {
-        const {
-          done,
-          value
-        } = await reader.read();
-        if (done) break;
-        received += value.length;
-        loadedBytes += value.length;
-        chunks.push(value);
-        let mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
-        let mbTotal = '60.7';
-        loadingText.textContent = `LOADING... ${mbDone} MB / ${mbTotal} MB`;
-      }
-      let fullBuffer = new Uint8Array(received);
-      let offset = 0;
-      for (let chunk of chunks) {
-        fullBuffer.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return fullBuffer.buffer;
-    }
-    async function mergeFiles(fileParts, cacheKey) {
-      const buffers = await Promise.all(
-        fileParts.map(part => fetchWithProgress(part))
-      );
-      const mergedBlob = new Blob(buffers);
-      return URL.createObjectURL(mergedBlob);
-    }
+  <script>
+    (function() {
+      const loadingText = document.querySelector("#loading-text");
 
-    function getParts(file, start, end) {
-      let parts = [];
-      for (let i = start; i <= end; i++) {
-        parts.push(file + ".part" + i);
-      }
-      return parts;
-    }
-    (async () => {
-      const [dataUrl, wasmUrl] = await Promise.all([
-        mergeFiles(getParts("Build/built.data", 1, 2), "built.data"),
-        mergeFiles(getParts("Build/built.wasm", 1, 2), "built.wasm"),
-      ]);
-      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-        var phoneScreenFixer = document.createElement('meta');
-        phoneScreenFixer.name = 'viewport';
-        phoneScreenFixer.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-        document.getElementsByTagName('head')[0].appendChild(phoneScreenFixer);
+      // Raw GitHub base — works from any origin
+      const REMOTE_BASE = "https://raw.githubusercontent.com/web-ports/iron-lung/main/";
+      const TOTAL_EXPECTED_MB = 60.7;
+      let loadedBytes = 0;
+
+      // -------------------------------------------------------------
+      //  Fetch a single part, update progress, return ArrayBuffer
+      // -------------------------------------------------------------
+      async function fetchWithProgress(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+        const reader = response.body.getReader();
+        const chunks = [];
+        let received = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received += value.length;
+          loadedBytes += value.length;
+          chunks.push(value);
+
+          const mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
+          loadingText.textContent = `LOADING... ${mbDone} MB / ${TOTAL_EXPECTED_MB} MB`;
+        }
+
+        const fullBuffer = new Uint8Array(received);
+        let offset = 0;
+        for (const chunk of chunks) {
+          fullBuffer.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return fullBuffer.buffer;
       }
 
-      var hugeCanvas = document.querySelector("#unity-canvas");
+      // -------------------------------------------------------------
+      //  Merge parts into a Blob with an explicit MIME type so the
+      //  browser / Unity loader knows what it's dealing with.
+      // -------------------------------------------------------------
+      async function mergeFiles(partUrls, mimeType) {
+        const buffers = await Promise.all(partUrls.map(u => fetchWithProgress(u)));
+        const mergedBlob = new Blob(buffers, { type: mimeType });
+        return URL.createObjectURL(mergedBlob);
+      }
 
-      createUnityInstance(hugeCanvas, {
-        dataUrl: dataUrl,
-        frameworkUrl: "Build/built.framework.js",
-        codeUrl: wasmUrl,
-        streamingAssetsUrl: "StreamingAssets",
-        companyName: "98Corbins",
-        productName: "Iron Lung",
-        productVersion: "1.0",
-      });
-      loadingText.remove();
+      function getPartUrls(baseName, start, end) {
+        const urls = [];
+        for (let i = start; i <= end; i++) urls.push(`${REMOTE_BASE}${baseName}.part${i}`);
+        return urls;
+      }
+
+      // -------------------------------------------------------------
+      //  Load a remote JS file as a Blob with the correct MIME type,
+      //  so browsers don't reject it as text/plain.
+      // -------------------------------------------------------------
+      async function loadScriptAsBlob(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+        const text = await response.text();
+        const blob = new Blob([text], { type: 'application/javascript' });
+        return URL.createObjectURL(blob);
+      }
+
+      (async () => {
+        try {
+          // 1) Download + merge data & wasm parts with proper MIME types
+          const dataPartUrls = getPartUrls('Build/built.data', 1, 2);
+          const wasmPartUrls = getPartUrls('Build/built.wasm', 1, 2);
+
+          const [dataUrl, wasmUrl] = await Promise.all([
+            mergeFiles(dataPartUrls, 'application/octet-stream'),
+            mergeFiles(wasmPartUrls, 'application/wasm'),
+          ]);
+
+          // 2) Mobile viewport fix
+          if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+            const meta = document.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+            document.head.appendChild(meta);
+          }
+
+          const canvas = document.querySelector("#unity-canvas");
+
+          // 3) Load built.loader.js as a blob so its MIME is correct
+          if (typeof createUnityInstance !== 'function') {
+            const loaderBlobUrl = await loadScriptAsBlob(`${REMOTE_BASE}Build/built.loader.js`);
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = loaderBlobUrl;
+              script.onload = resolve;
+              script.onerror = () => reject(new Error('Failed to execute built.loader.js'));
+              document.head.appendChild(script);
+            });
+          }
+
+          // 4) Pre-fetch the framework JS as a blob URL (correct MIME type)
+          const frameworkBlobUrl = await loadScriptAsBlob(`${REMOTE_BASE}Build/built.framework.js`);
+
+          // 5) Boot Unity
+          createUnityInstance(canvas, {
+            dataUrl: dataUrl,
+            frameworkUrl: frameworkBlobUrl,
+            codeUrl: wasmUrl,
+            streamingAssetsUrl: `${REMOTE_BASE}StreamingAssets`,
+            companyName: "98Corbins",
+            productName: "Iron Lung",
+            productVersion: "1.0",
+          }).then(() => {
+            if (loadingText.parentNode) loadingText.remove();
+          }).catch((err) => {
+            console.error('Unity instance error:', err);
+            loadingText.textContent = 'ERROR: ' + (err.message || 'unknown');
+            loadingText.style.webkitTextFillColor = '#ff5555';
+            loadingText.style.color = '#ff5555';
+            loadingText.style.background = 'none';
+          });
+
+        } catch (err) {
+          console.error('Loading failed:', err);
+          loadingText.textContent = 'LOADING FAILED — see console';
+          loadingText.style.webkitTextFillColor = '#ff5555';
+          loadingText.style.color = '#ff5555';
+          loadingText.style.background = 'none';
+        }
+      })();
     })();
   </script>
 </body>
-
 </html>
