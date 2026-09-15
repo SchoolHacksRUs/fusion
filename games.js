@@ -24,5 +24,5 @@ const games = [
       { title: "Clover Pit", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/web-ports/clover-pit/refs/heads/main/index.html", image: "https://raw.githubusercontent.com/NoahsAmazingTutoringHelp/Noahs-Calculus-Tutor/refs/heads/master/images/343.jpg" },
       { title: "Iron Lung", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/Ironlung.html", image: "https://raw.githubusercontent.com/NoahsAmazingTutoringHelp/Noahs-Calculus-Tutor/refs/heads/master/images/328.jpg" },
       { title: "Cheese Rolling", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/cheeserolling.html", image: "https://raw.githubusercontent.com/NoahsAmazingTutoringHelp/Noahs-Calculus-Tutor/refs/heads/master/images/414.jpg" },
-
+      { title: "60 Seconds", desc: "Stealth vehicle repossession", url: "https://raw.githubusercontent.com/SchoolHacksRUs/fusion/refs/heads/main/games/60seconds.html", image: "https://github.com/SchoolHacksRUs/fusion/blob/main/download%20(1).jpeg?raw=true" },
 ];
