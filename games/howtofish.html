@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>How To Fish · portable</title>
+  <style>
+    /* full-page canvas */
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    #unity-container { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #unity-canvas { width: 100% !important; height: 100% !important; display: block; background: #000; }
+    #unity-footer { display: none; }
+    #unity-loading-bar {
+      display: none;
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+    #unity-logo {
+      width: 154px; height: 130px; margin: 0 auto;
+      background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 154 130"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="20" fill="%23ffffff">LOADING</text></svg>') no-repeat center;
+    }
+    #unity-progress-bar-empty {
+      width: 200px; height: 14px;
+      margin: 10px auto 0 auto;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid #fff;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #unity-progress-bar-full {
+      width: 0%; height: 100%;
+      background: #fff;
+      transition: width 0.15s linear;
+    }
+    #unity-warning {
+      position: absolute;
+      left: 50%; top: 5%;
+      transform: translateX(-50%);
+      background: #f90; padding: 10px;
+      display: none; z-index: 12;
+    }
+    #info-badge {
+      position: fixed;
+      bottom: 10px; right: 12px;
+      color: #444; font-family: monospace; font-size: 11px;
+      z-index: 20; pointer-events: none;
+      background: rgba(0,0,0,0.4);
+      padding: 3px 9px; border-radius: 12px;
+      border: 1px solid #222;
+    }
+  </style>
+</head>
+<body>
+  <div id="unity-container" class="unity-desktop">
+    <canvas id="unity-canvas" width="960" height="600" tabindex="-1"></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+    </div>
+    <div id="unity-warning"></div>
+  </div>
+  <div id="info-badge">How To Fish · portable</div>
+
+  <script>
+    var canvas = document.querySelector("#unity-canvas");
+
+    // -------------------------------------------------------------
+    //  Remote base — jsDelivr mirrors the GitHub repo with proper
+    //  CORS + MIME headers for every file type.
+    // -------------------------------------------------------------
+    var REMOTE_BASE = "https://cdn.jsdelivr.net/gh/NotRexed/HowToFishPort@main/";
+    var buildUrl = REMOTE_BASE + "Build";
+
+    // -------------------------------------------------------------
+    //  Show Unity warnings/errors in the console instead of alerts.
+    // -------------------------------------------------------------
+    window.alert = function (m) { console.warn("[unity]", m); };
+    function unityShowBanner(msg, type) {
+      console.warn("[unity " + (type || "info") + "]", msg);
+    }
+
+    var loaderUrl = buildUrl + "/WebGL.loader.js";
+    var config = {
+      arguments: [],
+      dataUrl: buildUrl + "/WebGL.data",
+      frameworkUrl: buildUrl + "/WebGL.framework.js",
+      codeUrl: buildUrl + "/WebGL.wasm",
+      streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
+      companyName: "DefaultCompany",
+      productName: "ExportedProject",
+      productVersion: "1.0",
+      showBanner: unityShowBanner,
+      cacheControl: function (url) { return "no-store"; },
+      autoSyncPersistentDataPath: true,
+    };
+
+    // Mobile viewport fix
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+      document.querySelector("#unity-container").className = "unity-mobile";
+      canvas.className = "unity-mobile";
+    }
+
+    document.querySelector("#unity-loading-bar").style.display = "block";
+
+    // -------------------------------------------------------------
+    //  Probe whether a URL exists (some CDNs reject HEAD, so we
+    //  fall back to a one-byte ranged GET).
+    // -------------------------------------------------------------
+    async function exists(url) {
+      try {
+        var head = await fetch(url, { method: 'HEAD' });
+        if (head.ok) return true;
+        if (head.status === 404) return false;
+      } catch (e) {}
+      try {
+        var res = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+        return res.ok || res.status === 206;
+      } catch (e) { return false; }
+    }
+
+    // -------------------------------------------------------------
+    //  Resolve a payload URL: prefer the whole file; otherwise
+    //  merge the split parts into a single blob URL (memory-safe).
+    // -------------------------------------------------------------
+    async function resolveSplitFile(url) {
+      if (await exists(url)) return url;
+      var namings = [
+        function (i) { return url + '.part' + (i + 1); },
+        function (i) { return url + '.' + String(i).padStart(3, '0'); },
+        function (i) { return url + '.part' + String(i + 1).padStart(3, '0'); }
+      ];
+      for (var n = 0; n < namings.length; n++) {
+        if (!(await exists(namings[n](0)))) continue;
+        var blobs = [];
+        for (var i = 0; i < 128; i++) {
+          var part = namings[n](i);
+          if (!(await exists(part))) break;
+          blobs.push(await (await fetch(part)).blob());
+        }
+        // A Blob of Blobs can be backed by disk, so peak memory stays near one part.
+        return URL.createObjectURL(new Blob(blobs, { type: 'application/octet-stream' }));
+      }
+      throw new Error('Could not find ' + url + ' or any of its parts.');
+    }
+
+    // -------------------------------------------------------------
+    //  Boot sequence
+    // -------------------------------------------------------------
+    var script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = async () => {
+      config.dataUrl = await resolveSplitFile(config.dataUrl);
+      config.codeUrl = await resolveSplitFile(config.codeUrl);
+      createUnityInstance(canvas, config, (progress) => {
+        document.querySelector("#unity-progress-bar-full").style.width = 100 * progress + "%";
+      }).then((unityInstance) => {
+        window.unityInstance = unityInstance;
+        document.querySelector("#unity-loading-bar").style.display = "none";
+      }).catch((message) => {
+        console.error("[unity] boot failed:", message);
+        var bar = document.querySelector("#unity-loading-bar");
+        var err = document.createElement("p");
+        err.style.cssText = "color:#f55;font-family:monospace;font-size:13px;max-width:600px;text-align:center";
+        err.textContent = "LOAD FAILED: " + message;
+        bar.appendChild(err);
+      });
+    };
+    script.onerror = () => {
+      console.error("[unity] failed to load " + loaderUrl);
+    };
+    document.body.appendChild(script);
+  </script>
+</body>
+</html>
