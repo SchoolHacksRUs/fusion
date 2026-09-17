@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+    <title>LETHAL APE · portable</title>
+    <style>
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #231F20;
+      }
+      #unity-canvas {
+        width: 100%;
+        height: 100%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: block;
+      }
+      #loading-text {
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        font-weight: bold;
+        font-size: 48px;
+        font-family: cursive;
+        text-align: center;
+        white-space: nowrap;
+        background: linear-gradient(270deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #8f00ff);
+        background-size: 400% 400%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: rainbow 3s ease infinite;
+        z-index: 10;
+        pointer-events: none;
+        padding: 0 16px;
+      }
+      @keyframes rainbow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      #info-badge {
+        position: fixed; bottom: 10px; right: 12px;
+        color: #444; font-family: monospace; font-size: 11px;
+        z-index: 20; pointer-events: none;
+        background: rgba(0,0,0,0.4);
+        padding: 3px 9px; border-radius: 12px;
+        border: 1px solid #222;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading-text">LOADING...</div>
+    <canvas id="unity-canvas"></canvas>
+    <div id="info-badge">LETHAL APE · portable</div>
+
+    <script>
+      // -------------------------------------------------------------
+      //  jsDelivr base — mirrors the GitHub repo with proper CORS
+      //  and MIME headers. All Build/ paths go through this.
+      // -------------------------------------------------------------
+      var REMOTE_BASE = "https://cdn.jsdelivr.net/gh/web-ports/lethal-ape@main/";
+
+      var loadingText = document.querySelector("#loading-text");
+      var loadedBytes = 0;
+
+      async function fetchWithProgress(url) {
+        var response = await fetch(url);
+        if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+        var reader = response.body.getReader();
+        var chunks = [];
+        var received = 0;
+        while (true) {
+          var step = await reader.read();
+          if (step.done) break;
+          received += step.value.length;
+          loadedBytes += step.value.length;
+          chunks.push(step.value);
+          var mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
+          loadingText.textContent = "LOADING... " + mbDone + " MB / 124.71 MB";
+        }
+        var fullBuffer = new Uint8Array(received);
+        var offset = 0;
+        for (var i = 0; i < chunks.length; i++) {
+          fullBuffer.set(chunks[i], offset);
+          offset += chunks[i].length;
+        }
+        return fullBuffer.buffer;
+      }
+
+      // -------------------------------------------------------------
+      //  Merge split files into a Blob with an explicit MIME type.
+      //  The MIME hint is what makes WebAssembly.instantiateStreaming
+      //  work on the merged blob URL.
+      //
+      //  Cache API is used opportunistically; if it's unavailable
+      //  (file:// or non-HTTPS context), we silently skip caching
+      //  instead of crashing.
+      // -------------------------------------------------------------
+      async function mergeFiles(fileParts, cacheKey, mimeType) {
+        var cache = null;
+        try {
+          cache = await caches.open("gash-cache");
+          var cachedResponse = await cache.match(cacheKey);
+          if (cachedResponse) {
+            var blob = await cachedResponse.blob();
+            return URL.createObjectURL(blob);
+          }
+        } catch (e) {
+          // Cache API unavailable — proceed without caching.
+        }
+
+        var buffers = await Promise.all(fileParts.map(function (p) { return fetchWithProgress(p); }));
+        var mergedBlob = new Blob(buffers, { type: mimeType });
+
+        if (cache) {
+          try {
+            await cache.put(cacheKey, new Response(mergedBlob));
+          } catch (e) { /* quota or clone error; ignore */ }
+        }
+
+        return URL.createObjectURL(mergedBlob);
+      }
+
+      function getParts(file, start, end) {
+        var parts = [];
+        for (var i = start; i <= end; i++) {
+          parts.push(REMOTE_BASE + file + ".part" + i);
+        }
+        return parts;
+      }
+
+      // -------------------------------------------------------------
+      //  Boot sequence
+      // -------------------------------------------------------------
+      (async function () {
+        try {
+          var dataUrl, wasmUrl;
+          var pair = await Promise.all([
+            mergeFiles(getParts("Build/lethal.data", 1, 5), "lethal.data", "application/octet-stream"),
+            mergeFiles(getParts("Build/lethal.wasm", 1, 2), "lethal.wasm", "application/wasm")
+          ]);
+          dataUrl = pair[0];
+          wasmUrl = pair[1];
+
+          var canvas = document.querySelector("#unity-canvas");
+
+          // Mobile viewport fix
+          if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+            var meta = document.createElement("meta");
+            meta.name = "viewport";
+            meta.content = "width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes";
+            document.head.appendChild(meta);
+          }
+
+          // Load the Unity loader script from the CDN (same as the
+          // original, just with an absolute URL so it works from
+          // anywhere).
+          if (typeof createUnityInstance !== "function") {
+            await new Promise(function (resolve, reject) {
+              var s = document.createElement("script");
+              s.src = REMOTE_BASE + "Build/lethal.loader.js";
+              s.onload = resolve;
+              s.onerror = function () { reject(new Error("Failed to load lethal.loader.js")); };
+              document.head.appendChild(s);
+            });
+          }
+
+          createUnityInstance(canvas, {
+            dataUrl: dataUrl,
+            frameworkUrl: REMOTE_BASE + "Build/lethal.framework.js",
+            codeUrl: wasmUrl,
+            streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
+            companyName: "StellaDev",
+            productName: "LETHAL APE",
+            productVersion: "0.2",
+            showBanner: function (msg, type) {
+              console.warn("[unity " + (type || "info") + "]", msg);
+            }
+          }).then(function () {
+            if (loadingText.parentNode) loadingText.remove();
+          }).catch(function (err) {
+            console.error("[LETHAL APE] boot failed:", err);
+            loadingText.textContent = "LOAD FAILED: " + (err && err.message ? err.message : err);
+            loadingText.style.webkitTextFillColor = "#ff5555";
+            loadingText.style.color = "#ff5555";
+            loadingText.style.background = "none";
+          });
+
+        } catch (err) {
+          console.error("[LETHAL APE] load failed:", err);
+          loadingText.textContent = "LOAD FAILED: " + (err && err.message ? err.message : err);
+          loadingText.style.webkitTextFillColor = "#ff5555";
+          loadingText.style.color = "#ff5555";
+          loadingText.style.background = "none";
+        }
+      })();
+    </script>
+  </body>
+</html>
