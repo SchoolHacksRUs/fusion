@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en-us">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+  <title>ULTRAKILL · portable</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100%;
+      width: 100%;
+      background: #000;
+    }
+    #unity-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+    #loading-text {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-family: monospace;
+      font-size: 22px;
+      text-align: center;
+      z-index: 10;
+      pointer-events: none;
+      white-space: pre-wrap;
+    }
+    #error-text {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ff5555;
+      font-family: monospace;
+      font-size: 14px;
+      text-align: center;
+      max-width: 80%;
+      display: none;
+      white-space: pre-wrap;
+      z-index: 20;
+    }
+    #info-badge {
+      position: fixed; bottom: 10px; right: 12px;
+      color: #444; font-family: monospace; font-size: 11px;
+      z-index: 30; pointer-events: none;
+      background: rgba(0,0,0,0.4);
+      padding: 3px 9px; border-radius: 12px;
+      border: 1px solid #222;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="loading-text">LOADING...</div>
+  <div id="error-text"></div>
+  <canvas id="unity-canvas"></canvas>
+  <div id="info-badge">ULTRAKILL · portable</div>
+
+  <script>
+    // -------------------------------------------------------------
+    //  Raw GitHub base — no size cap, no repo-total cap.
+    //  We fetch everything as blobs and wrap with explicit MIME
+    //  types, so GitHub's text/plain on .js doesn't matter.
+    //  (jsDelivr 403s this repo: 65+ games blow the size cap.)
+    // -------------------------------------------------------------
+    var REMOTE_BASE = "https://raw.githubusercontent.com/genizy/web-port/main/ultrakill/";
+
+    var canvas = document.querySelector("#unity-canvas");
+    var loadingText = document.querySelector("#loading-text");
+    var errorText = document.querySelector("#error-text");
+
+    function showError(msg) {
+      loadingText.style.display = "none";
+      errorText.style.display = "block";
+      errorText.textContent = msg;
+      console.error("[ULTRAKILL]", msg);
+    }
+
+    function setStatus(msg) {
+      loadingText.textContent = msg;
+    }
+
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      var meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+    }
+
+    function mergeFiles(fileParts, mimeType, label) {
+      return new Promise(function (resolve, reject) {
+        var buffers = [];
+        function fetchPart(index) {
+          if (index >= fileParts.length) {
+            resolve(URL.createObjectURL(new Blob(buffers, { type: mimeType })));
+            return;
+          }
+          var url = fileParts[index];
+          setStatus("Downloading " + label + " " + (index + 1) + " / " + fileParts.length + "...");
+          fetch(url)
+            .then(function (response) {
+              if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+              return response.arrayBuffer();
+            })
+            .then(function (data) {
+              buffers.push(data);
+              fetchPart(index + 1);
+            })
+            .catch(function (err) {
+              reject(new Error("Fetch failed for " + url + ": " + err.message));
+            });
+        }
+        fetchPart(0);
+      });
+    }
+
+    function getParts(file, start, end) {
+      var parts = [];
+      for (var i = start; i <= end; i++) {
+        parts.push(REMOTE_BASE + file + ".part" + i);
+      }
+      return parts;
+    }
+
+    async function loadScriptAsBlob(url) {
+      var r = await fetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+      var text = await r.text();
+      var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+      await new Promise(function (resolve, reject) {
+        var s = document.createElement("script");
+        s.src = blobUrl;
+        s.onload = resolve;
+        s.onerror = function () { reject(new Error("Failed to execute " + url)); };
+        document.head.appendChild(s);
+      });
+      return blobUrl;
+    }
+
+    async function loadFrameworkAsBlob(url) {
+      var r = await fetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+      var text = await r.text();
+      return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+    }
+
+    (async function () {
+      try {
+        setStatus("Loading engine...");
+        await loadScriptAsBlob(REMOTE_BASE + "Build/ultrakill.loader.js");
+
+        var frameworkUrl = await loadFrameworkAsBlob(
+          REMOTE_BASE + "Build/ultrakill.framework.js.unityweb"
+        );
+
+        var pair = await Promise.all([
+          mergeFiles(getParts("Build/ultrakill.data.unityweb", 1, 4), "application/octet-stream", "data"),
+          mergeFiles(getParts("Build/ultrakill.wasm.unityweb", 1, 2), "application/wasm", "wasm")
+        ]);
+
+        setStatus("Starting engine...");
+
+        createUnityInstance(canvas, {
+          dataUrl: pair[0],
+          frameworkUrl: frameworkUrl,
+          codeUrl: pair[1],
+          streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
+          companyName: "Hakita and Cake Logic",
+          productName: "ULTRAKILL",
+          productVersion: "1.4",
+          showBanner: function (msg, type) {
+            console.warn("[unity " + (type || "info") + "]", msg);
+          }
+        }).then(function () {
+          if (loadingText.parentNode) loadingText.remove();
+        }).catch(function (err) {
+          showError("BOOT FAILED: " + (err && err.message ? err.message : err));
+        });
+
+      } catch (err) {
+        showError("LOAD FAILED: " + (err && err.message ? err.message : err));
+      }
+    })();
+  </script>
+</body>
+
+</html>
