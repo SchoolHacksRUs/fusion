@@ -3,9 +3,66 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
     <title>60 Seconds - Web</title>
-    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/usheje883-maker/60-Seconds-Webport@main/Image.png">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/usheje883-maker/60-Seconds-Webport@main/TemplateData/style.css">
+    <link rel="shortcut icon" href="https://raw.githubusercontent.com/usheje883-maker/60-Seconds-Webport/main/Image.png">
+    <link rel="stylesheet" href="https://raw.githubusercontent.com/usheje883-maker/60-Seconds-Webport/main/TemplateData/style.css">
+    <style>
+      html, body {
+        margin: 0; padding: 0;
+        width: 100%; height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      #unity-container {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+      #unity-canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+        background: #000;
+      }
+      #unity-loading-bar {
+        display: none;
+        position: absolute;
+        left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 10;
+      }
+      #unity-progress-bar-empty {
+        width: 300px; height: 14px;
+        background: rgba(255,255,255,0.12);
+        border: 1px solid #fff;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #unity-progress-bar-full {
+        height: 100%; width: 0%;
+        background: #fff;
+        transition: width 0.15s linear;
+      }
+      #loading-info {
+        color: #fff;
+        font-family: monospace;
+        font-size: 13px;
+        text-align: center;
+        margin-top: 10px;
+        letter-spacing: 0.4px;
+      }
+      #unity-warning {
+        position: absolute;
+        left: 50%; top: 5%;
+        transform: translateX(-50%);
+        background: #f90;
+        padding: 10px;
+        display: none;
+        z-index: 12;
+      }
+    </style>
   </head>
   <body>
     <div id="unity-container" class="unity-desktop">
@@ -15,15 +72,22 @@
         <div id="unity-progress-bar-empty">
           <div id="unity-progress-bar-full"></div>
         </div>
+        <div id="loading-info">Loading...</div>
       </div>
       <div id="unity-warning"> </div>
     </div>
+
     <script>
       var container = document.querySelector("#unity-container");
       var canvas = document.querySelector("#unity-canvas");
       var loadingBar = document.querySelector("#unity-loading-bar");
       var progressBarFull = document.querySelector("#unity-progress-bar-full");
       var warningBanner = document.querySelector("#unity-warning");
+      var loadingInfo = document.querySelector("#loading-info");
+
+      function setLoadingInfo(text) {
+        loadingInfo.textContent = text;
+      }
 
       function unityShowBanner(msg, type) {
         function updateBannerVisibility() {
@@ -43,52 +107,123 @@
         updateBannerVisibility();
       }
 
-      var baseUrl = "https://cdn.jsdelivr.net/gh/usheje883-maker/60-Seconds-Webport@main/";
+      // Fit the canvas to fill the viewport.
+      function resizeCanvas() {
+        canvas.style.width = window.innerWidth + "px";
+        canvas.style.height = window.innerHeight + "px";
+      }
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      var baseUrl = "https://raw.githubusercontent.com/usheje883-maker/60-Seconds-Webport/main/";
       var buildUrl = baseUrl + "Build";
       var loaderUrl = buildUrl + "/Build.loader.js";
       loadingBar.style.display = "block";
+      setLoadingInfo("Fetching assets...");
 
-      var dataFiles = ["Build.data.unityweb.0","Build.data.unityweb.1","Build.data.unityweb.2","Build.data.unityweb.3","Build.data.unityweb.4","Build.data.unityweb.5"];
+      async function fetchBytes(url) {
+        var r = await fetch(url, { cache: 'no-store' });
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        return new Uint8Array(await r.arrayBuffer());
+      }
 
-      Promise.all(dataFiles.map(function(f) {
-        return fetch(buildUrl + "/" + f).then(function(r) { if (!r.ok) throw Error("Failed "+f); return r.arrayBuffer(); });
-      })).then(function(parts){
-        var total = parts.reduce(function(s, b) { return s + b.byteLength; }, 0);
-        var combined = new Uint8Array(total);
-        var off = 0;
-        parts.forEach(function(buf) { combined.set(new Uint8Array(buf), off); off += buf.byteLength; });
-        var dataBlob = URL.createObjectURL(new Blob([combined]));
+      async function fetchAsJsBlob(url) {
+        var bytes = await fetchBytes(url);
+        return URL.createObjectURL(new Blob([bytes], { type: "application/javascript" }));
+      }
 
-        var config = {
-          dataUrl: dataBlob,
-          frameworkUrl: buildUrl + "/Build.framework.js.unityweb",
-          codeUrl: buildUrl + "/Build.wasm.unityweb",
-          streamingAssetsUrl: baseUrl + "StreamingAssets",
-          companyName: "Robot Gentleman",
-          productName: "60 Seconds",
-          productVersion: "1.0",
-          showBanner: unityShowBanner,
-        };
+      var dataFiles = [
+        "Build.data.unityweb.0",
+        "Build.data.unityweb.1",
+        "Build.data.unityweb.2",
+        "Build.data.unityweb.3",
+        "Build.data.unityweb.4",
+        "Build.data.unityweb.5"
+      ];
 
-        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-          container.className = "unity-mobile";
-          config.devicePixelRatio = 1;
-          unityShowBanner('WebGL builds are not supported on mobile devices.');
+      (async function () {
+        try {
+          // 1) Merge data parts (0..70%).
+          var parts = [];
+          var total = 0;
+          for (var i = 0; i < dataFiles.length; i++) {
+            var url = buildUrl + "/" + dataFiles[i];
+            var r = await fetch(url, { cache: 'no-store' });
+            if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+            var bytes = new Uint8Array(await r.arrayBuffer());
+            parts.push(bytes);
+            total += bytes.byteLength;
+            progressBarFull.style.width = ((i + 1) / dataFiles.length * 70) + "%";
+            setLoadingInfo("Loading data... " + (i + 1) + "/" + dataFiles.length + " parts (" + (total / 1048576).toFixed(1) + " MB)");
+          }
+          var combined = new Uint8Array(total);
+          var off = 0;
+          for (var j = 0; j < parts.length; j++) { combined.set(parts[j], off); off += parts[j].byteLength; }
+          var dataBlob = URL.createObjectURL(new Blob([combined], { type: "application/octet-stream" }));
+
+          // 2) Framework (70..75%).
+          setLoadingInfo("Loading framework...");
+          var frameworkBytes = await fetchBytes(buildUrl + "/Build.framework.js.unityweb");
+          var frameworkBlob = URL.createObjectURL(new Blob([frameworkBytes], { type: "application/javascript" }));
+          progressBarFull.style.width = "75%";
+
+          // 3) Wasm (75..80%).
+          setLoadingInfo("Loading wasm...");
+          var wasmBytes = await fetchBytes(buildUrl + "/Build.wasm.unityweb");
+          var wasmBlob = URL.createObjectURL(new Blob([wasmBytes], { type: "application/wasm" }));
+          progressBarFull.style.width = "80%";
+
+          var config = {
+            dataUrl: dataBlob,
+            frameworkUrl: frameworkBlob,
+            codeUrl: wasmBlob,
+            streamingAssetsUrl: baseUrl + "StreamingAssets",
+            companyName: "Robot Gentleman",
+            productName: "60 Seconds",
+            productVersion: "1.0",
+            showBanner: unityShowBanner,
+          };
+
+          if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+            container.className = "unity-mobile";
+            config.devicePixelRatio = 1;
+            unityShowBanner('WebGL builds are not supported on mobile devices.');
+          }
+
+          // 4) Loader (80..85%).
+          setLoadingInfo("Loading engine...");
+          var loaderBlob = await fetchAsJsBlob(loaderUrl);
+          progressBarFull.style.width = "85%";
+
+          var script = document.createElement("script");
+          script.src = loaderBlob;
+          script.onload = function () {
+            setLoadingInfo("Starting game...");
+            createUnityInstance(canvas, config, function (progress) {
+              // 85..100% is the engine's own progress.
+              var overall = 85 + progress * 15;
+              progressBarFull.style.width = overall + "%";
+              setLoadingInfo("Starting game... " + Math.round(overall) + "%");
+            }).then(function (unityInstance) {
+              progressBarFull.style.width = "100%";
+              setLoadingInfo("Ready");
+              setTimeout(function () {
+                loadingBar.style.display = "none";
+                resizeCanvas();
+              }, 300);
+            }).catch(function (message) {
+              alert(message);
+            });
+          };
+          script.onerror = function () {
+            alert("Failed to load loader");
+          };
+          document.head.appendChild(script);
+
+        } catch (err) {
+          alert("Load failed: " + (err && err.message ? err.message : err));
         }
-
-        var script = document.createElement("script");
-        script.src = loaderUrl;
-        script.onload = function(){
-          createUnityInstance(canvas, config, function(progress){
-            progressBarFull.style.width = 100 * progress + "%";
-          }).then(function(unityInstance){
-            loadingBar.style.display = "none";
-          }).catch(function(message){
-            alert(message);
-          });
-        };
-        document.body.appendChild(script);
-      });
+      })();
     </script>
   </body>
 </html>
