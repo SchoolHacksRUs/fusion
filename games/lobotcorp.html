@@ -131,137 +131,184 @@
     </svg>
     <span style="vertical-align: middle;">FULLSCREEN</span>
 </button>
-<script src="https://cdn.jsdelivr.net/gh/Reeyuki/lobcorp@main/Build/UnityLoader.js"></script>
+
 <script>
-    (function () {
-        const cdn = 'https://cdn.jsdelivr.net/gh/Reeyuki/lobcorp@main/Build/';
-        const tasks = [
-            { name: 'web.json', size: 501, type: 'text' },
-            { name: 'web.wasm.framework.unityweb', size: 95575, type: 'blob' },
-            { name: 'web.wasm.code.unityweb', size: 8211250, type: 'blob' }
-        ];
-        const dataCount = 58;
-        for (let i = 0; i < dataCount; i++) {
-            tasks.push({
-                name: 'web.data.unityweb' + String(i).padStart(2, '0'),
-                size: i === dataCount - 1 ? 11890053 : 20971520,
-                type: 'blob'
-            });
+    // -------------------------------------------------------------
+    //  Raw GitHub base. jsDelivr rejects this repo (or the parts are
+    //  large enough to exceed its caps), so all assets come from raw
+    //  GitHub.
+    // -------------------------------------------------------------
+    var REMOTE_BASE = "https://raw.githubusercontent.com/Reeyuki/lobcorp/main/Build/";
+
+    // Fetch interceptor: rewrite relative Build/... URLs to raw GitHub.
+    var origFetch = window.fetch;
+    window.fetch = function (input, init) {
+        var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+        if (url && (url.indexOf('Build/') === 0 || url.indexOf('/Build/') !== -1)) {
+            url = url.replace(/^.*Build\//, REMOTE_BASE);
         }
+        if (input && input.url && url !== input.url) input = new Request(url, input);
+        else if (typeof input === "string") input = url;
+        return origFetch.call(this, input, init);
+    };
 
-        const progressText = document.getElementById('progress-text');
-        const progressBar = document.getElementById('progress-bar');
-        const loaderOverlay = document.getElementById('loader-overlay');
-        const fullscreenBtn = document.getElementById('fullscreen-btn');
+    // Load UnityLoader.js as a blob (raw GitHub serves .js as
+    // text/plain, blocking <script src> execution).
+    function loadScriptAsBlob(url) {
+        return new Promise(function (resolve, reject) {
+            fetch(url)
+                .then(function (r) {
+                    if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+                    return r.text();
+                })
+                .then(function (text) {
+                    var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+                    var s = document.createElement("script");
+                    s.src = blobUrl;
+                    s.onload = resolve;
+                    s.onerror = function () { reject(new Error("Failed to execute " + url)); };
+                    document.head.appendChild(s);
+                })
+                .catch(reject);
+        });
+    }
 
-        let loadedBytes = 0;
-        const totalBytes = tasks.reduce((sum, t) => sum + t.size, 0);
+    (async function () {
+        try {
+            await loadScriptAsBlob(REMOTE_BASE + "UnityLoader.js");
 
-        const promises = tasks.map(task => {
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('GET', cdn + task.name);
-                xhr.responseType = task.type;
-                let lastLoaded = 0;
-                xhr.onprogress = (e) => {
-                    const loaded = e.loaded || 0;
-                    loadedBytes += (loaded - lastLoaded);
-                    lastLoaded = loaded;
-                    const pct = Math.min(100, Math.round((loadedBytes / totalBytes) * 100));
-                    progressText.textContent = 'Loading Assets... ' + pct + '%';
-                    progressBar.style.width = pct + '%';
-                };
-                xhr.onload = () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        loadedBytes += (task.size - lastLoaded);
+            const cdn = REMOTE_BASE;
+            const tasks = [
+                { name: 'web.json', size: 501, type: 'text' },
+                { name: 'web.wasm.framework.unityweb', size: 95575, type: 'blob' },
+                { name: 'web.wasm.code.unityweb', size: 8211250, type: 'blob' }
+            ];
+            const dataCount = 58;
+            for (let i = 0; i < dataCount; i++) {
+                tasks.push({
+                    name: 'web.data.unityweb' + String(i).padStart(2, '0'),
+                    size: i === dataCount - 1 ? 11890053 : 20971520,
+                    type: 'blob'
+                });
+            }
+
+            const progressText = document.getElementById('progress-text');
+            const progressBar = document.getElementById('progress-bar');
+            const loaderOverlay = document.getElementById('loader-overlay');
+            const fullscreenBtn = document.getElementById('fullscreen-btn');
+
+            let loadedBytes = 0;
+            const totalBytes = tasks.reduce((sum, t) => sum + t.size, 0);
+
+            const promises = tasks.map(task => {
+                return new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', cdn + task.name);
+                    xhr.responseType = task.type;
+                    let lastLoaded = 0;
+                    xhr.onprogress = (e) => {
+                        const loaded = e.loaded || 0;
+                        loadedBytes += (loaded - lastLoaded);
+                        lastLoaded = loaded;
                         const pct = Math.min(100, Math.round((loadedBytes / totalBytes) * 100));
                         progressText.textContent = 'Loading Assets... ' + pct + '%';
                         progressBar.style.width = pct + '%';
-                        resolve(xhr.response);
-                    } else {
-                        reject(new Error(task.name));
-                    }
-                };
-                xhr.onerror = () => reject(new Error(task.name));
-                xhr.send();
-            });
-        });
-
-        Promise.all(promises).then(results => {
-            const jsonContent = results[0];
-            const frameworkBlob = results[1];
-            const codeBlob = results[2];
-            const dataChunks = results.slice(3);
-
-            const dataBlob = new Blob(dataChunks, { type: 'application/octet-stream' });
-            const dataBlobUrl = URL.createObjectURL(dataBlob);
-            const frameworkBlobUrl = URL.createObjectURL(frameworkBlob);
-            const codeBlobUrl = URL.createObjectURL(codeBlob);
-
-            const jsonBlob = new Blob([jsonContent], { type: 'application/json' });
-            const jsonBlobUrl = URL.createObjectURL(jsonBlob);
-
-            const originalOpen = XMLHttpRequest.prototype.open;
-            XMLHttpRequest.prototype.open = function (method, url, ...args) {
-                if (typeof url === 'string') {
-                    if (url.endsWith('web.json')) {
-                        url = jsonBlobUrl;
-                    } else if (url.endsWith('web.data.unityweb')) {
-                        url = dataBlobUrl;
-                    } else if (url.endsWith('web.wasm.code.unityweb')) {
-                        url = codeBlobUrl;
-                    } else if (url.endsWith('web.wasm.framework.unityweb')) {
-                        url = frameworkBlobUrl;
-                    }
-                }
-                return originalOpen.apply(this, [method, url, ...args]);
-            };
-
-            const originalFetch = window.fetch;
-            window.fetch = function (input, init) {
-                let url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
-                if (typeof url === 'string') {
-                    let redirected = null;
-                    if (url.endsWith('web.json')) {
-                        redirected = jsonBlobUrl;
-                    } else if (url.endsWith('web.data.unityweb')) {
-                        redirected = dataBlobUrl;
-                    } else if (url.endsWith('web.wasm.code.unityweb')) {
-                        redirected = codeBlobUrl;
-                    } else if (url.endsWith('web.wasm.framework.unityweb')) {
-                        redirected = frameworkBlobUrl;
-                    }
-                    if (redirected) {
-                        if (input instanceof Request) {
-                            input = new Request(redirected, input);
+                    };
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            loadedBytes += (task.size - lastLoaded);
+                            const pct = Math.min(100, Math.round((loadedBytes / totalBytes) * 100));
+                            progressText.textContent = 'Loading Assets... ' + pct + '%';
+                            progressBar.style.width = pct + '%';
+                            resolve(xhr.response);
                         } else {
-                            input = redirected;
+                            reject(new Error(task.name + " (HTTP " + xhr.status + ")"));
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error(task.name + " (network error)"));
+                    xhr.send();
+                });
+            });
+
+            Promise.all(promises).then(results => {
+                const jsonContent = results[0];
+                const frameworkBlob = results[1];
+                const codeBlob = results[2];
+                const dataChunks = results.slice(3);
+
+                const dataBlob = new Blob(dataChunks, { type: 'application/octet-stream' });
+                const dataBlobUrl = URL.createObjectURL(dataBlob);
+                const frameworkBlobUrl = URL.createObjectURL(frameworkBlob);
+                const codeBlobUrl = URL.createObjectURL(codeBlob);
+
+                const jsonBlob = new Blob([jsonContent], { type: 'application/json' });
+                const jsonBlobUrl = URL.createObjectURL(jsonBlob);
+
+                const originalOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function (method, url, ...args) {
+                    if (typeof url === 'string') {
+                        if (url.endsWith('web.json')) {
+                            url = jsonBlobUrl;
+                        } else if (url.endsWith('web.data.unityweb')) {
+                            url = dataBlobUrl;
+                        } else if (url.endsWith('web.wasm.code.unityweb')) {
+                            url = codeBlobUrl;
+                        } else if (url.endsWith('web.wasm.framework.unityweb')) {
+                            url = frameworkBlobUrl;
                         }
                     }
-                }
-                return originalFetch.call(this, input, init);
-            };
+                    return originalOpen.apply(this, [method, url, ...args]);
+                };
 
-            progressText.textContent = 'Initializing Game...';
-            const unityInstance = UnityLoader.instantiate('unityContainer', 'Build/web.json', {
-                onProgress: function (instance, progress) {
-                    if (progress === 1) {
-                        loaderOverlay.style.opacity = 0;
-                        setTimeout(() => {
-                            loaderOverlay.style.display = 'none';
-                            fullscreenBtn.style.display = 'flex';
-                        }, 500);
+                const originalFetch = window.fetch;
+                window.fetch = function (input, init) {
+                    let url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
+                    if (typeof url === 'string') {
+                        let redirected = null;
+                        if (url.endsWith('web.json')) {
+                            redirected = jsonBlobUrl;
+                        } else if (url.endsWith('web.data.unityweb')) {
+                            redirected = dataBlobUrl;
+                        } else if (url.endsWith('web.wasm.code.unityweb')) {
+                            redirected = codeBlobUrl;
+                        } else if (url.endsWith('web.wasm.framework.unityweb')) {
+                            redirected = frameworkBlobUrl;
+                        }
+                        if (redirected) {
+                            if (input instanceof Request) {
+                                input = new Request(redirected, input);
+                            } else {
+                                input = redirected;
+                            }
+                        }
                     }
-                }
-            });
+                    return originalFetch.call(this, input, init);
+                };
 
-            fullscreenBtn.onclick = () => {
-                unityInstance.SetFullscreen(1);
-            };
-        }).catch(err => {
-            progressText.textContent = 'Error: ' + err.message;
-            progressText.style.color = '#ef4444';
-        });
+                progressText.textContent = 'Initializing Game...';
+                const unityInstance = UnityLoader.instantiate('unityContainer', 'Build/web.json', {
+                    onProgress: function (instance, progress) {
+                        if (progress === 1) {
+                            loaderOverlay.style.opacity = 0;
+                            setTimeout(() => {
+                                loaderOverlay.style.display = 'none';
+                                fullscreenBtn.style.display = 'flex';
+                            }, 500);
+                        }
+                    }
+                });
+
+                fullscreenBtn.onclick = () => {
+                    unityInstance.SetFullscreen(1);
+                };
+            }).catch(err => {
+                progressText.textContent = 'Error: ' + err.message;
+                progressText.style.color = '#ef4444';
+            });
+        } catch (err) {
+            document.getElementById('progress-text').textContent = 'Error: ' + err.message;
+            document.getElementById('progress-text').style.color = '#ef4444';
+        }
     })();
 </script>
 </body>
