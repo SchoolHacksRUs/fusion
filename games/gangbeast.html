@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Gang Beasts</title>
+    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/SchoolHacksRUs/GangBeast-WebPort@main/TemplateData/favicon.ico">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/SchoolHacksRUs/GangBeast-WebPort@main/TemplateData/style.css">
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+      #unity-container { position: absolute; inset: 0; width: 100%; height: 100%; }
+      #unity-canvas { width: 100% !important; height: 100% !important; display: block; background: #000; }
+      #unity-footer { display: none; }
+      #unity-loading-bar { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+      #unity-progress-bar-empty { width: 200px; height: 12px; background: rgba(255,255,255,0.15); border: 1px solid #fff; border-radius: 3px; overflow: hidden; }
+      #unity-progress-bar-full { height: 100%; width: 0%; background: #fff; transition: width 0.15s linear; }
+    </style>
+  </head>
+  <body>
+    <div id="unity-container" class="unity-desktop">
+      <canvas id="unity-canvas" width="1280" height="720"></canvas>
+      <div id="unity-loading-bar">
+        <div id="unity-logo"></div>
+        <div id="unity-progress-bar-empty">
+          <div id="unity-progress-bar-full"></div>
+        </div>
+      </div>
+      <div id="unity-mobile-warning">WebGL builds are not supported on mobile devices.</div>
+    </div>
+
+    <script>
+      var CDN       = "https://cdn.jsdelivr.net/gh/SchoolHacksRUs/GangBeast-WebPort@main/";
+      var GITHUBRAW = "https://raw.githubusercontent.com/SchoolHacksRUs/GangBeast-WebPort/main/";
+
+      window.__CDN_BASE = CDN;
+      window.__GITHUB_RAW = GITHUBRAW;
+
+      // Fetch interceptor:
+      //  - rewrites relative Build/... and StreamingAssets/... to the CDN
+      //  - retries any failing CDN URL against raw GitHub (which has a
+      //    higher per-file size cap)
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url ? input.url : String(input));
+
+        if (url && (url.indexOf('Build/') === 0 || url.indexOf('StreamingAssets/') === 0)) {
+          url = CDN + url;
+        }
+
+        if (url.indexOf(CDN) === 0) {
+          var githubUrl = url.replace(CDN, GITHUBRAW);
+          return origFetch(url, init).then(function (res) {
+            if (res.ok) return res;
+            return origFetch(githubUrl, init);
+          }).catch(function () {
+            return origFetch(githubUrl, init);
+          });
+        }
+
+        return origFetch(url, init);
+      };
+
+      var gd = document.createElement("script");
+      gd.src = CDN + "game-data.js";
+      document.head.appendChild(gd);
+    </script>
+
+    <script type="module">
+      import brotliPromise from "https://cdn.jsdelivr.net/npm/brotli-wasm@3.0.1/index.web.js?module";
+      window.brotliReady = brotliPromise;
+    </script>
+
+    <script>
+      async function fetchBrotliAsBlob(url, mimeType) {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("HTTP " + res.status + " for " + url);
+        const compressed = new Uint8Array(await res.arrayBuffer());
+        const brotli = await window.brotliReady;
+        const decompressed = brotli.decompress(compressed);
+        return URL.createObjectURL(new Blob([decompressed], { type: mimeType }));
+      }
+
+      var buildUrl = CDN + "Build";
+      var loaderUrl = buildUrl + "/WebGLValidation.loader.js";
+
+      var config = {
+        dataUrl: null,
+        frameworkUrl: null,
+        codeUrl: null,
+        streamingAssetsUrl: CDN + "StreamingAssets",
+        companyName: "Boneloaf",
+        productName: "Gang Beasts",
+        productVersion: "1.0",
+      };
+
+      var container = document.querySelector("#unity-container");
+      var canvas = document.querySelector("#unity-canvas");
+      var loadingBar = document.querySelector("#unity-loading-bar");
+      var progressBarFull = document.querySelector("#unity-progress-bar-full");
+      var mobileWarning = document.querySelector("#unity-mobile-warning");
+
+      if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+        container.className = "unity-mobile";
+        config.devicePixelRatio = 1;
+        mobileWarning.style.display = "block";
+        setTimeout(() => { mobileWarning.style.display = "none"; }, 5000);
+      }
+
+      loadingBar.style.display = "block";
+
+      var script = document.createElement("script");
+      script.src = loaderUrl;
+      script.onload = async () => {
+        var dataBlobUrl, frameworkBlobUrl, codeBlobUrl;
+        try {
+          dataBlobUrl = await loadGameData("Build/data-manifest.json", (progress) => {
+            progressBarFull.style.width = (40 * progress) + "%";
+          });
+          config.dataUrl = dataBlobUrl;
+
+          frameworkBlobUrl = await fetchBrotliAsBlob(
+            buildUrl + "/WebGLValidation.framework.js.br",
+            "application/javascript"
+          );
+          config.frameworkUrl = frameworkBlobUrl;
+          progressBarFull.style.width = "70%";
+
+          codeBlobUrl = await fetchBrotliAsBlob(
+            buildUrl + "/WebGLValidation.wasm.br",
+            "application/wasm"
+          );
+          config.codeUrl = codeBlobUrl;
+          progressBarFull.style.width = "80%";
+
+          await createUnityInstance(canvas, config, (progress) => {
+            progressBarFull.style.width = (80 + 20 * progress) + "%";
+          }).then((unityInstance) => {
+            loadingBar.style.display = "none";
+          });
+        } catch (error) {
+          console.error('Boot failed: ' + (error && error.message ? error.message : error));
+          alert("No se pudo cargar el juego. Recarga para volver a intentarlo. " + error.message);
+        } finally {
+          if (dataBlobUrl) URL.revokeObjectURL(dataBlobUrl);
+          if (frameworkBlobUrl) URL.revokeObjectURL(frameworkBlobUrl);
+          if (codeBlobUrl) URL.revokeObjectURL(codeBlobUrl);
+        }
+      };
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>
