@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en-us">
   <head>
-    <base href="https://cdn.jsdelivr.net/gh/dashiellbenton/ports@main/tmfds/">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <title>The Message From Deep Space</title>
@@ -103,13 +102,16 @@
         }
       };
 
-      var BUILD = "Build";
+      // Raw GitHub base. No <base> tag is used because the loader and framework
+      // need to be fetched as blobs (raw GitHub serves .js as text/plain, which
+      // browsers refuse to execute as <script src> or use as a framework URL).
+      var CDN_BASE = "https://raw.githubusercontent.com/dashiellbenton/ports/main/tmfds/";
+      var BUILD = CDN_BASE + "Build";
 
-      // Absolute CDN base — passed to C# via the ?cdn= query param so the level
-      // streamer fetches LevelBundles from jsDelivr instead of the page origin.
-      var CDN_BASE = "https://cdn.jsdelivr.net/gh/dashiellbenton/ports@main/tmfds/";
-
-      if (CDN_BASE) {
+      // Pass the CDN base to the game via query param so the C# level streamer
+      // (which resolves bundle URLs against Application.absoluteURL, ignoring
+      // <base>) fetches LevelBundles from raw GitHub too.
+      {
         var u = new URL(window.location.href);
         if (u.searchParams.get("cdn") !== CDN_BASE) {
           u.searchParams.set("cdn", CDN_BASE);
@@ -154,7 +156,10 @@
         }
       })();
 
-      async function assemble(entry, label) {
+      // Assemble a payload (whole file or parts) into a blob URL with an
+      // explicit MIME type. The MIME hint is what makes Unity accept the
+      // blob as wasm/JS/data regardless of the raw GitHub Content-Type.
+      async function assemble(entry, label, mimeType) {
         var urls = entry.parts || [entry.file];
         var cache = await cachePromise;
         var buffers = [];
@@ -191,50 +196,64 @@
             report(label, fromCache);
           }
         }
-        return URL.createObjectURL(new Blob(buffers));
+        return URL.createObjectURL(new Blob(buffers, { type: mimeType }));
+      }
+
+      // Fetch a remote JS file as text and wrap it in a blob with the correct
+      // MIME type. Required for raw GitHub, which serves .js as text/plain.
+      async function fetchAsJsBlob(url) {
+        var res = await fetch(url);
+        if (!res.ok) throw new Error("failed to fetch " + url + " (" + res.status + ")");
+        var text = await res.text();
+        return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
       }
 
       (async function () {
         try {
-          var dataUrl      = await assemble(MANIFEST.data, "game data");
-          var frameworkUrl = await assemble(MANIFEST.framework, "framework");
-          var codeUrl      = await assemble(MANIFEST.code, "code");
+          var dataUrl      = await assemble(MANIFEST.data, "game data", "application/octet-stream");
+          var frameworkUrl = await assemble(MANIFEST.framework, "framework", "application/javascript");
+          var codeUrl      = await assemble(MANIFEST.code, "code", "application/wasm");
+
+          setMsg("Loading loader…");
+          var loaderUrl = await fetchAsJsBlob(BUILD + "/" + MANIFEST.loader.file);
 
           setMsg("Starting…");
-          var script = document.createElement("script");
-          script.src = BUILD + "/" + MANIFEST.loader.file;
-          script.onload = function () {
-            createUnityInstance(canvas, {
-              dataUrl: dataUrl,
-              frameworkUrl: frameworkUrl,
-              codeUrl: codeUrl,
-              streamingAssetsUrl: "StreamingAssets",
-              companyName: "Applesinmypants",
-              productName: "The Message From Deep Space",
-              productVersion: "1.0",
-            }, function (p) {
-              bar.style.display = "block";
-              barfill.style.width = Math.round(p * 100) + "%";
-              setMsg("Loading… " + Math.round(p * 100) + "%");
-            }).then(function (instance) {
-              window.unityInstance = instance;
-              bar.style.display = "none";
-              setMsg("");
-              var fs = document.querySelector("#fs");
-              fs.style.display = "block";
-              fs.onclick = function () {
-                window.__webportAllowFullscreen = true;
-                if (instance.SetFullscreen) instance.SetFullscreen(1);
-                else if (canvas.requestFullscreen) canvas.requestFullscreen();
-                window.__webportAllowFullscreen = false;
-                canvas.focus();
-              };
-            }).catch(function (e) {
-              setMsg("Failed to start: " + e);
-            });
-          };
-          script.onerror = function () { setMsg("Failed to load " + script.src); };
-          document.body.appendChild(script);
+          await new Promise(function (resolve, reject) {
+            var script = document.createElement("script");
+            script.src = loaderUrl;
+            script.onload = resolve;
+            script.onerror = function () { reject(new Error("failed to execute loader")); };
+            document.head.appendChild(script);
+          });
+
+          createUnityInstance(canvas, {
+            dataUrl: dataUrl,
+            frameworkUrl: frameworkUrl,
+            codeUrl: codeUrl,
+            streamingAssetsUrl: CDN_BASE + "StreamingAssets",
+            companyName: "Applesinmypants",
+            productName: "The Message From Deep Space",
+            productVersion: "1.0",
+          }, function (p) {
+            bar.style.display = "block";
+            barfill.style.width = Math.round(p * 100) + "%";
+            setMsg("Loading… " + Math.round(p * 100) + "%");
+          }).then(function (instance) {
+            window.unityInstance = instance;
+            bar.style.display = "none";
+            setMsg("");
+            var fs = document.querySelector("#fs");
+            fs.style.display = "block";
+            fs.onclick = function () {
+              window.__webportAllowFullscreen = true;
+              if (instance.SetFullscreen) instance.SetFullscreen(1);
+              else if (canvas.requestFullscreen) canvas.requestFullscreen();
+              window.__webportAllowFullscreen = false;
+              canvas.focus();
+            };
+          }).catch(function (e) {
+            setMsg("Failed to start: " + e);
+          });
         } catch (e) {
           setMsg(String(e));
         }
