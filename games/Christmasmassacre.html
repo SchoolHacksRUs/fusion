@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en-us">
   <head>
-    <base href="https://cdn.jsdelivr.net/gh/web-ports/christmas-massacre@main/">
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>Christmas Massacre</title>
@@ -22,127 +21,194 @@
         display: block !important;
       }
       #loading-text {
-  font-weight: bold;
-  background: linear-gradient(
-    270deg,
-    #ff0000,
-    #ff7f00,
-    #ffff00,
-    #00ff00,
-    #0000ff,
-    #4b0082,
-    #8f00ff
-  );
-  background-size: 400% 400%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: rainbow 3s ease infinite;
-}
-
-@keyframes rainbow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        font-weight: bold;
+        font-size: 48px;
+        font-family: cursive;
+        text-align: center;
+        white-space: nowrap;
+        background: linear-gradient(
+          270deg,
+          #ff0000,
+          #ff7f00,
+          #ffff00,
+          #00ff00,
+          #0000ff,
+          #4b0082,
+          #8f00ff
+        );
+        background-size: 400% 400%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: rainbow 3s ease infinite;
+        z-index: 10;
+        pointer-events: none;
+        padding: 0 16px;
+      }
+      @keyframes rainbow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
     </style>
-    <div id="loading-text"
-    style="color: white; font-size: 48px; font-family: cursive; text-align: center; margin-top: 20px;"> LOADING...
-  </div>
-    <script src="Build/UnityLoader.js"></script>
-    <script>
-      var loadingText = document.querySelector("#loading-text");
-    let totalBytes = 0;
-    let loadedBytes = 0;
-
-    async function fetchWithProgress(url) {
-      const response = await fetch(url);
-      const reader = response.body.getReader();
-      let chunks = [];
-      let received = 0;
-      while (true) {
-        const {
-          done,
-          value
-        } = await reader.read();
-        if (done) break;
-        received += value.length;
-        loadedBytes += value.length;
-        chunks.push(value);
-        let mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
-        let mbTotal = '349.95';
-        loadingText.textContent = `LOADING... ${mbDone} MB / ${mbTotal} MB`;
-      }
-      let fullBuffer = new Uint8Array(received);
-      let offset = 0;
-      for (let chunk of chunks) {
-        fullBuffer.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return fullBuffer.buffer;
-    }
-
-    async function mergeFiles(fileParts, cacheKey) {
-      const buffers = await Promise.all(
-        fileParts.map(part => fetchWithProgress(part))
-      );
-      const mergedBlob = new Blob(buffers);
-      return URL.createObjectURL(mergedBlob);
-    }
-
-    function getParts(file, start, end) {
-      let parts = [];
-      for (let i = start; i <= end; i++) {
-        parts.push(file + ".part" + i);
-      }
-      return parts;
-    }
-    (async () => {
-      const [dataUrl, wasmUrl] = await Promise.all([
-        mergeFiles(getParts("Build/testbuild.data.unityweb", 1, 15), "testbuild.data.unityweb"),
-        mergeFiles(getParts("Build/testbuild.asm.code.unityweb", 1, 4), "testbuild.asm.code.unityweb"),
-      ]);
-            const originalFetch = window.fetch;
-            window.fetch = async function(input, init) {
-                let urlString;
-
-                if (input instanceof Request) {
-                    urlString = input.url;
-                } else {
-                    urlString = String(input);
-                }
-
-                if (urlString.includes("testbuild.asm.code.unityweb")) {
-                    if (input instanceof Request) {
-                        input = new Request(wasmUrl, input);
-                    } else {
-                        input = wasmUrl;
-                    }
-                } else if (urlString.includes("testbuild.data.unityweb")){
-                    if (input instanceof Request) {
-                        input = new Request(dataUrl, input);
-                    } else {
-                        input = dataUrl;
-                    }
-                }
-
-                return originalFetch(input, init);
-            };
-
-            const originalOpen = XMLHttpRequest.prototype.open;
-            XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-                if (url.includes("testbuild.asm.code.unityweb")) {
-                    url = wasmUrl;
-                } else if (url.includes("testbuild.data.unityweb")){
-                    url = dataUrl;
-                }
-                return originalOpen.call(this, method, url, ...rest);
-            };
-      var bigolgameboi = UnityLoader.instantiate("gameContainer", "Build/testbuild.json");
-      loadingText.remove();
-    })();
-    </script>
   </head>
   <body>
+    <div id="loading-text">LOADING...</div>
     <div id="gameContainer"></div>
+
+    <script>
+      var REMOTE_BASE = "https://raw.githubusercontent.com/web-ports/christmas-massacre/main/";
+      var loadingText = document.querySelector("#loading-text");
+      let loadedBytes = 0;
+
+      // Fetch a URL as raw bytes with progress reporting.
+      async function fetchWithProgress(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+        const reader = response.body.getReader();
+        let chunks = [];
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received += value.length;
+          loadedBytes += value.length;
+          chunks.push(value);
+          let mbDone = (loadedBytes / (1024 * 1024)).toFixed(2);
+          loadingText.textContent = `LOADING... ${mbDone} MB / 349.95 MB`;
+        }
+        let fullBuffer = new Uint8Array(received);
+        let offset = 0;
+        for (let chunk of chunks) {
+          fullBuffer.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return fullBuffer.buffer;
+      }
+
+      // Merge split parts into a blob with an explicit MIME type. The MIME
+      // hint matters for WebAssembly.instantiateStreaming (needs
+      // application/wasm or application/javascript) and for Unity's loader
+      // (needs application/octet-stream for .data).
+      async function mergeFiles(fileParts, mimeType) {
+        const buffers = await Promise.all(
+          fileParts.map(part => fetchWithProgress(part))
+        );
+        const mergedBlob = new Blob(buffers, { type: mimeType });
+        return URL.createObjectURL(mergedBlob);
+      }
+
+      function getParts(base, file, start, end) {
+        let parts = [];
+        for (let i = start; i <= end; i++) {
+          parts.push(base + file + ".part" + i);
+        }
+        return parts;
+      }
+
+      // Fetch a JS file as raw bytes, wrap in a blob with application/javascript.
+      // Raw GitHub serves .js as text/plain, which browsers refuse to execute
+      // as <script src> and which Unity refuses to use as a framework URL.
+      async function fetchAsJsBlob(url) {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        return URL.createObjectURL(new Blob([bytes], { type: "application/javascript" }));
+      }
+
+      (async () => {
+        try {
+          // 1) Load the UnityLoader as a blob so it executes despite raw
+          //    GitHub's text/plain Content-Type.
+          const loaderBlob = await fetchAsJsBlob(REMOTE_BASE + "Build/UnityLoader.js");
+          await new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = loaderBlob;
+            s.onload = resolve;
+            s.onerror = () => reject(new Error("Failed to execute UnityLoader.js"));
+            document.head.appendChild(s);
+          });
+
+          // 2) Merge the split payloads with explicit MIME types.
+          const [dataUrl, wasmUrl] = await Promise.all([
+            mergeFiles(getParts(REMOTE_BASE, "Build/testbuild.data.unityweb", 1, 15), "application/octet-stream"),
+            mergeFiles(getParts(REMOTE_BASE, "Build/testbuild.asm.code.unityweb", 1, 4), "application/javascript"),
+          ]);
+
+          // 3) Fetch testbuild.json and patch the payload URLs to the blob
+          //    URLs. Legacy UnityLoader resolves payload URLs from the JSON
+          //    relative to the JSON's own location, so relative paths would
+          //    resolve to raw GitHub. But raw GitHub's text/plain MIME on
+          //    .unityweb files can trip the loader in some browsers, and we
+          //    already have the merged blobs, so patch the JSON to use them.
+          console.info("Fetching testbuild.json");
+          const jsonRes = await fetch(REMOTE_BASE + "Build/testbuild.json");
+          if (!jsonRes.ok) throw new Error("HTTP " + jsonRes.status + " for testbuild.json");
+          const buildJson = await jsonRes.json();
+
+          // Rewrite every URL-ish field to the merged blob URLs.
+          const urlKeys = [
+            "dataUrl", "wasmCodeUrl", "asmCodeUrl",
+            "wasmFrameworkUrl", "asmFrameworkUrl", "asmMemoryUrl"
+          ];
+          for (const k of urlKeys) {
+            if (!buildJson[k]) continue;
+            if (/\.data\.unityweb$/i.test(buildJson[k])) {
+              buildJson[k] = dataUrl;
+            } else if (/\.asm\.code\.unityweb$/i.test(buildJson[k])) {
+              buildJson[k] = wasmUrl;
+            } else {
+              // Framework, memory, etc. — resolve against raw GitHub and
+              // blob-wrap JS files to dodge the text/plain MIME issue.
+              const abs = REMOTE_BASE + "Build/" + buildJson[k].replace(/^.*\//, "");
+              if (/\.js(\.unityweb)?$/i.test(abs)) {
+                buildJson[k] = await fetchAsJsBlob(abs);
+              } else {
+                buildJson[k] = abs;
+              }
+            }
+          }
+
+          const patchedJsonUrl = URL.createObjectURL(
+            new Blob([JSON.stringify(buildJson)], { type: "application/json" })
+          );
+
+          // 4) Intercept fetch/XHR so any requests the legacy loader makes
+          //    for the split payloads get served from our blobs.
+          const originalFetch = window.fetch;
+          window.fetch = async function (input, init) {
+            let urlString = (input instanceof Request) ? input.url : String(input);
+            if (urlString.includes("testbuild.asm.code.unityweb")) {
+              input = (input instanceof Request) ? new Request(wasmUrl, input) : wasmUrl;
+            } else if (urlString.includes("testbuild.data.unityweb")) {
+              input = (input instanceof Request) ? new Request(dataUrl, input) : dataUrl;
+            }
+            return originalFetch(input, init);
+          };
+
+          const originalOpen = XMLHttpRequest.prototype.open;
+          XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+            if (url.includes("testbuild.asm.code.unityweb")) {
+              url = wasmUrl;
+            } else if (url.includes("testbuild.data.unityweb")) {
+              url = dataUrl;
+            }
+            return originalOpen.call(this, method, url, ...rest);
+          };
+
+          // 5) Boot.
+          var bigolgameboi = UnityLoader.instantiate("gameContainer", patchedJsonUrl);
+          loadingText.remove();
+        } catch (err) {
+          loadingText.textContent = "FAILED: " + (err && err.message ? err.message : err);
+          loadingText.style.webkitTextFillColor = "#ff5555";
+          loadingText.style.color = "#ff5555";
+          loadingText.style.background = "none";
+          console.error(err);
+        }
+      })();
+    </script>
   </body>
 </html>
