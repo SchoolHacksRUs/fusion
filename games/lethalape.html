@@ -53,6 +53,48 @@
         padding: 3px 9px; border-radius: 12px;
         border: 1px solid #222;
       }
+
+      /* Debug log panel */
+      #log-panel {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        max-height: 45vh;
+        background: rgba(10, 10, 10, 0.94);
+        color: #d1d1d1;
+        font-family: monospace; font-size: 12px; line-height: 1.4;
+        border-top: 2px solid #7cc242;
+        z-index: 9999;
+        display: flex; flex-direction: column;
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.6);
+      }
+      #log-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 6px 10px; background: #1e2a1e;
+        font-weight: bold; user-select: none;
+      }
+      #log-header .title { color: #7cc242; letter-spacing: 1px; }
+      #log-actions button {
+        background: #444; color: #d1d1d1; border: 1px solid #555;
+        padding: 2px 8px; margin-left: 4px;
+        font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px;
+      }
+      #log-actions button:hover { background: #555; }
+      #log-body {
+        flex: 1; overflow-y: auto; padding: 8px 10px;
+        white-space: pre-wrap; word-break: break-word;
+      }
+      #log-body .line { padding: 1px 0; }
+      #log-body .line.error { color: #ff6b6b; }
+      #log-body .line.warn  { color: #ffd166; }
+      #log-body .line.info  { color: #8fd3f4; }
+      #log-body .line.net   { color: #b4e197; }
+      #log-toggle {
+        position: fixed; bottom: 8px; right: 8px;
+        background: #7cc242; color: #000;
+        font-family: monospace; font-size: 12px; font-weight: bold;
+        border: none; padding: 6px 12px; border-radius: 4px;
+        cursor: pointer; z-index: 10000; display: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      }
     </style>
   </head>
   <body>
@@ -60,12 +102,129 @@
     <canvas id="unity-canvas"></canvas>
     <div id="info-badge">LETHAL APE · portable</div>
 
+    <div id="log-panel">
+      <div id="log-header">
+        <span class="title">LETHAL APE · DEBUG LOG</span>
+        <span id="log-actions">
+          <button id="log-clear">Clear</button>
+          <button id="log-copy">Copy</button>
+          <button id="log-hide">✕</button>
+        </span>
+      </div>
+      <div id="log-body"></div>
+    </div>
+    <button id="log-toggle">Show Log</button>
+
+    <script>
+      // ============================================================
+      //  Debug logger. __L() bypasses the console wrappers so our
+      //  own messages don't double-fire.
+      // ============================================================
+      (function () {
+        var logBody, logPanel, logToggle;
+        var maxLines = 600;
+
+        function ready(fn) {
+          if (document.readyState !== 'loading') fn();
+          else document.addEventListener('DOMContentLoaded', fn);
+        }
+        ready(function () {
+          logBody = document.getElementById('log-body');
+          logPanel = document.getElementById('log-panel');
+          logToggle = document.getElementById('log-toggle');
+
+          document.getElementById('log-clear').addEventListener('click', function () { logBody.innerHTML = ''; });
+          document.getElementById('log-copy').addEventListener('click', function () {
+            var text = logBody.innerText;
+            if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { __L('Log copied to clipboard.', 'info'); });
+            else {
+              var ta = document.createElement('textarea');
+              ta.value = text; document.body.appendChild(ta); ta.select();
+              try { document.execCommand('copy'); __L('Log copied.', 'info'); } catch (e) {}
+              document.body.removeChild(ta);
+            }
+          });
+          document.getElementById('log-hide').addEventListener('click', function () {
+            logPanel.style.display = 'none'; logToggle.style.display = 'block';
+          });
+          logToggle.addEventListener('click', function () {
+            logPanel.style.display = 'flex'; logToggle.style.display = 'none';
+          });
+
+          __L('Logger initialized.', 'info');
+          __L('location.href: ' + location.href, 'info');
+        });
+
+        function appendLine(text, cls) {
+          if (!logBody) return;
+          var div = document.createElement('div');
+          div.className = 'line' + (cls ? ' ' + cls : '');
+          div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+          logBody.appendChild(div);
+          while (logBody.children.length > maxLines) logBody.removeChild(logBody.firstChild);
+          logBody.scrollTop = logBody.scrollHeight;
+        }
+        window.__appendLog = appendLine;
+
+        function L(text, cls) { appendLine(text, cls); }
+        window.__L = L;
+
+        var orig = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+        console.log   = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), '');      orig.log.apply(console, arguments); };
+        console.warn  = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'warn');  orig.warn.apply(console, arguments); };
+        console.error = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'error'); orig.error.apply(console, arguments); };
+        console.info  = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'info');  orig.info.apply(console, arguments); };
+
+        function fmt(x) {
+          if (typeof x === 'string') return x;
+          if (x instanceof Error) return x.name + ': ' + x.message + (x.stack ? '\n' + x.stack : '');
+          try { return JSON.stringify(x); } catch (e) { return String(x); }
+        }
+
+        window.addEventListener('error', function (e) {
+          var msg = (e.message || 'unknown error');
+          if (e.filename) msg += ' (' + e.filename + ':' + e.lineno + ')';
+          appendLine('UNCAUGHT: ' + msg, 'error');
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          appendLine('UNHANDLED REJECTION: ' + fmt(e.reason), 'error');
+        });
+      })();
+    </script>
+
     <script>
       // -------------------------------------------------------------
-      //  jsDelivr base — mirrors the GitHub repo with proper CORS
-      //  and MIME headers. All Build/ paths go through this.
+      //  Raw GitHub base. jsDelivr 403s on this repo, so all assets
+      //  come from raw GitHub instead.
       // -------------------------------------------------------------
-      var REMOTE_BASE = "https://cdn.jsdelivr.net/gh/web-ports/lethal-ape@main/";
+      var REMOTE_BASE = "https://raw.githubusercontent.com/web-ports/lethal-ape/main/";
+
+      __L('REMOTE_BASE = ' + REMOTE_BASE, 'info');
+
+      // Fetch interceptor: log + rewrite relative URLs.
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+        var original = url;
+        if (url && url.indexOf(REMOTE_BASE) !== 0 && !/^(https?:|blob:|data:)/i.test(url)) {
+          url = REMOTE_BASE + url.replace(/^\.?\/+/, "");
+        }
+        if (url.indexOf('blob:') !== 0) {
+          __L('FETCH ' + url + (url !== original ? '  (from ' + original + ')' : ''), 'net');
+        }
+        if (input && input.url && url !== input.url) input = new Request(url, input);
+        else if (typeof input === 'string') input = url;
+        return origFetch.call(this, input, init).then(function (res) {
+          if (url.indexOf('blob:') !== 0) {
+            if (!res.ok) __L('  → HTTP ' + res.status + ' ' + res.statusText + '  ' + url, 'error');
+            else __L('  → ' + res.status + '  ' + (res.headers.get('Content-Length') || '?') + ' bytes', 'net');
+          }
+          return res;
+        }).catch(function (e) {
+          if (url.indexOf('blob:') !== 0) __L('  → NETWORK FAIL: ' + e.message + '  ' + url, 'error');
+          throw e;
+        });
+      };
 
       var loadingText = document.querySelector("#loading-text");
       var loadedBytes = 0;
@@ -94,35 +253,31 @@
         return fullBuffer.buffer;
       }
 
-      // -------------------------------------------------------------
-      //  Merge split files into a Blob with an explicit MIME type.
-      //  The MIME hint is what makes WebAssembly.instantiateStreaming
-      //  work on the merged blob URL.
-      //
-      //  Cache API is used opportunistically; if it's unavailable
-      //  (file:// or non-HTTPS context), we silently skip caching
-      //  instead of crashing.
-      // -------------------------------------------------------------
       async function mergeFiles(fileParts, cacheKey, mimeType) {
+        __L('Merging ' + fileParts.length + ' parts for ' + cacheKey + ' (mime=' + mimeType + ')', 'info');
+
         var cache = null;
         try {
           cache = await caches.open("gash-cache");
           var cachedResponse = await cache.match(cacheKey);
           if (cachedResponse) {
+            __L('  cache hit for ' + cacheKey, 'info');
             var blob = await cachedResponse.blob();
             return URL.createObjectURL(blob);
           }
         } catch (e) {
-          // Cache API unavailable — proceed without caching.
+          __L('  Cache API unavailable: ' + e.message, 'warn');
         }
 
         var buffers = await Promise.all(fileParts.map(function (p) { return fetchWithProgress(p); }));
+        __L('  merged ' + buffers.reduce(function (a, b) { return a + b.byteLength; }, 0) + ' bytes', 'info');
         var mergedBlob = new Blob(buffers, { type: mimeType });
 
         if (cache) {
           try {
             await cache.put(cacheKey, new Response(mergedBlob));
-          } catch (e) { /* quota or clone error; ignore */ }
+            __L('  cached under ' + cacheKey, 'info');
+          } catch (e) { __L('  cache put failed: ' + e.message, 'warn'); }
         }
 
         return URL.createObjectURL(mergedBlob);
@@ -136,11 +291,19 @@
         return parts;
       }
 
-      // -------------------------------------------------------------
-      //  Boot sequence
-      // -------------------------------------------------------------
+      async function fetchAsJsBlob(url) {
+        __L('Fetching JS as blob: ' + url, 'info');
+        var r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        var text = await r.text();
+        __L('  ' + url.split('/').pop() + ': ' + text.length + ' bytes', 'info');
+        return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+      }
+
       (async function () {
         try {
+          __L('Starting boot sequence…', 'info');
+
           var dataUrl, wasmUrl;
           var pair = await Promise.all([
             mergeFiles(getParts("Build/lethal.data", 1, 5), "lethal.data", "application/octet-stream"),
@@ -148,10 +311,11 @@
           ]);
           dataUrl = pair[0];
           wasmUrl = pair[1];
+          __L('Data URL: ' + dataUrl, 'info');
+          __L('Wasm URL: ' + wasmUrl, 'info');
 
           var canvas = document.querySelector("#unity-canvas");
 
-          // Mobile viewport fix
           if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
             var meta = document.createElement("meta");
             meta.name = "viewport";
@@ -159,34 +323,46 @@
             document.head.appendChild(meta);
           }
 
-          // Load the Unity loader script from the CDN (same as the
-          // original, just with an absolute URL so it works from
-          // anywhere).
           if (typeof createUnityInstance !== "function") {
+            __L('Loading loader as blob…', 'info');
+            var loaderBlobUrl = await fetchAsJsBlob(REMOTE_BASE + "Build/lethal.loader.js");
+            __L('Injecting loader…', 'info');
             await new Promise(function (resolve, reject) {
               var s = document.createElement("script");
-              s.src = REMOTE_BASE + "Build/lethal.loader.js";
-              s.onload = resolve;
-              s.onerror = function () { reject(new Error("Failed to load lethal.loader.js")); };
+              s.src = loaderBlobUrl;
+              s.onload = function () { __L('Loader executed.', 'info'); resolve(); };
+              s.onerror = function () { reject(new Error("Failed to execute lethal.loader.js")); };
               document.head.appendChild(s);
             });
           }
 
+          __L('Fetching framework as blob…', 'info');
+          var frameworkBlobUrl = await fetchAsJsBlob(REMOTE_BASE + "Build/lethal.framework.js");
+
+          __L('Calling createUnityInstance…', 'info');
+          var lastPct = -1;
           createUnityInstance(canvas, {
             dataUrl: dataUrl,
-            frameworkUrl: REMOTE_BASE + "Build/lethal.framework.js",
+            frameworkUrl: frameworkBlobUrl,
             codeUrl: wasmUrl,
             streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
             companyName: "StellaDev",
             productName: "LETHAL APE",
             productVersion: "0.2",
             showBanner: function (msg, type) {
-              console.warn("[unity " + (type || "info") + "]", msg);
+              __L('[unity ' + (type || 'info') + '] ' + msg, 'warn');
+            }
+          }, function (progress) {
+            var pct = Math.round(progress * 100);
+            if (pct >= lastPct + 10) {
+              lastPct = pct;
+              __L('Unity progress: ' + pct + '%', 'info');
             }
           }).then(function () {
+            __L('Unity instance created. Game running.', 'info');
             if (loadingText.parentNode) loadingText.remove();
           }).catch(function (err) {
-            console.error("[LETHAL APE] boot failed:", err);
+            __L('[LETHAL APE] boot failed: ' + (err && err.message ? err.message : err), 'error');
             loadingText.textContent = "LOAD FAILED: " + (err && err.message ? err.message : err);
             loadingText.style.webkitTextFillColor = "#ff5555";
             loadingText.style.color = "#ff5555";
@@ -194,7 +370,7 @@
           });
 
         } catch (err) {
-          console.error("[LETHAL APE] load failed:", err);
+          __L('[LETHAL APE] load failed: ' + (err && err.message ? err.message : err), 'error');
           loadingText.textContent = "LOAD FAILED: " + (err && err.message ? err.message : err);
           loadingText.style.webkitTextFillColor = "#ff5555";
           loadingText.style.color = "#ff5555";
