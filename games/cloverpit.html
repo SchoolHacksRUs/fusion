@@ -113,10 +113,10 @@
       const loadingText = document.querySelector("#loading-text");
 
       // -------------------------------------------------------------
-      //  jsDelivr CDN base (mirrors the GitHub repo, sends correct CORS
-      //  and MIME headers, no raw.githubusercontent text/plain problem)
+      //  Raw GitHub base. jsDelivr can 403 this repo if it exceeds its
+      //  total-size cap; raw GitHub has no such cap.
       // -------------------------------------------------------------
-      const REMOTE_BASE = "https://cdn.jsdelivr.net/gh/web-ports/clover-pit@main/";
+      const REMOTE_BASE = "https://raw.githubusercontent.com/web-ports/clover-pit/main/";
       const TOTAL_EXPECTED_MB = 86.96;
       let loadedBytes = 0;
 
@@ -168,7 +168,10 @@
       }
 
       // -------------------------------------------------------------
-      //  Fetch a remote JS file as a blob with correct MIME type
+      //  Fetch a remote JS file as a blob with correct MIME type.
+      //  Raw GitHub serves .js as text/plain, which browsers refuse
+      //  to execute as <script src> and Unity refuses to use as a
+      //  framework URL.
       // -------------------------------------------------------------
       async function loadScriptAsBlob(url) {
         const response = await fetch(url);
@@ -179,7 +182,7 @@
       }
 
       // -------------------------------------------------------------
-      //  Unity banner helper (silent, matches original behavior)
+      //  Unity banner helper
       // -------------------------------------------------------------
       function unityShowBanner(msg, type) {
         const warningBanner = document.querySelector("#unity-warning");
