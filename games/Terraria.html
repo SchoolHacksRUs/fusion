@@ -1,47 +1,124 @@
 <!doctype html>
 <html lang="en">
-	<base href="https://cdn.jsdelivr.net/gh/web-ports/terraria@main/">
-	<head>
-		<meta charset="UTF-8" />
-		<link rel="icon" href="./app.ico" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<meta property="og:title" content="Terrarium" />
-		<meta
-			property="og:description"
-			content="Terraria port for WebAssembly. Play Terraria online in the browser."
-		/>
-		<meta
-			name="description"
-			content="Terraria port for WebAssembly. Play Terraria online in the browser."
-		/>
-		<style>
-			html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="https://raw.githubusercontent.com/web-ports/terraria/main/app.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta property="og:title" content="Terrarium" />
+    <meta
+      property="og:description"
+      content="Terraria port for WebAssembly. Play Terraria online in the browser."
+    />
+    <meta
+      name="description"
+      content="Terraria port for WebAssembly. Play Terraria online in the browser."
+    />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      #game-container, iframe, canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+        display: block;
+      }
+    </style>
+    <link rel="canonical" href="https://terraria.mercurywork.shop" />
+    <title>Terrarium</title>
+  </head>
 
-#game-container, iframe, canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border: none;
-  display: block;
-}
-		</style>
-		<link rel="canonical" href="https://terraria.mercurywork.shop" />
-		<title>Terrarium</title>
-		<script type="module" crossorigin src="main.js"></script>
-	</head>
+  <body>
+    <div id="app"></div>
+    <canvas id="canvas" style="width: 100%"></canvas>
 
-	<body>
-		<div id="app"></div>
-		<canvas id="canvas" style="width: 100%">
+    <script>
+      // -------------------------------------------------------------
+      //  Raw GitHub base. jsDelivr's repo-total-size cap rejects some
+      //  repos, and this port's assets are large enough to hit it.
+      // -------------------------------------------------------------
+      var REMOTE_BASE = "https://raw.githubusercontent.com/web-ports/terraria/main/";
 
-		</canvas>
-	</body>
+      // Intercept fetch/XHR before main.js runs so anything that tries
+      // to resolve a relative URL against the page origin instead hits
+      // the raw GitHub base.
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+        if (url && url.charAt(0) === "/") {
+          url = REMOTE_BASE + url.replace(/^\/+/, "");
+        } else if (url && !/^(https?:|blob:|data:)/i.test(url) && url.indexOf(REMOTE_BASE) !== 0) {
+          url = REMOTE_BASE + url;
+        }
+        if (input && input.url && url !== input.url) {
+          input = new Request(url, input);
+        } else {
+          input = url;
+        }
+        return origFetch.call(this, input, init);
+      };
+
+      var origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        var u = String(url);
+        if (u.charAt(0) === "/") {
+          url = REMOTE_BASE + u.replace(/^\/+/, "");
+        } else if (!/^(https?:|blob:|data:)/i.test(u) && u.indexOf(REMOTE_BASE) !== 0) {
+          url = REMOTE_BASE + u;
+        }
+        var args = Array.prototype.slice.call(arguments);
+        args[1] = url;
+        return origOpen.apply(this, args);
+      };
+    </script>
+
+    <!-- main.js loaded as a module from raw GitHub. Raw GitHub serves .js
+         as text/plain, but ES module imports honor Content-Type, so we
+         need to load it as a blob with application/javascript MIME. -->
+    <script>
+      (function () {
+        fetch(REMOTE_BASE + "main.js")
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status + " for main.js");
+            return r.text();
+          })
+          .then(function (text) {
+            // Rewrite any relative imports inside main.js to absolute raw
+            // GitHub URLs so sub-modules resolve correctly.
+            var rewritten = text.replace(
+              /(from\s*["'])(\.\/)([^"']+)(["'])/g,
+              function (_, p1, _p2, path, p4) {
+                return p1 + REMOTE_BASE + path + p4;
+              }
+            ).replace(
+              /(import\s*\(\s*["'])(\.\/)([^"']+)(["'])/g,
+              function (_, p1, _p2, path, p4) {
+                return p1 + REMOTE_BASE + path + p4;
+              }
+            );
+
+            var blobUrl = URL.createObjectURL(new Blob([rewritten], { type: "text/javascript" }));
+            var s = document.createElement("script");
+            s.type = "module";
+            s.src = blobUrl;
+            document.head.appendChild(s);
+          })
+          .catch(function (err) {
+            console.error("Failed to load main.js:", err);
+            var msg = document.createElement("div");
+            msg.style.cssText = "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#f55;font-family:monospace;font-size:14px;text-align:center;max-width:80%;z-index:100;padding:20px;background:#000;border:1px solid #f55;border-radius:6px";
+            msg.textContent = "LOAD FAILED: " + (err && err.message ? err.message : err);
+            document.body.appendChild(msg);
+          });
+      })();
+    </script>
+  </body>
 </html>
