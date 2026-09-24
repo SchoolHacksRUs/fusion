@@ -2,73 +2,197 @@
 <html lang="en">
 
 <head>
-    <base href="https://cdn.jsdelivr.net/gh/genizy/web-port@main/buckshot-roulette/index.html">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
     <title>Buckshot Roulette</title>
-    <link rel="stylesheet" href="style.css">
-    <link id="-gd-engine-icon" rel="icon" type="image/png" href="buckshot-roulette.icon.png" />
-    <link rel="apple-touch-icon" href="buckshot-roulette.apple-touch-icon.png" />
+    <link rel="stylesheet" href="https://raw.githubusercontent.com/genizy/web-port/main/buckshot-roulette/style.css">
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/genizy/web-port/main/buckshot-roulette/buckshot-roulette.icon.png" />
+    <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/genizy/web-port/main/buckshot-roulette/buckshot-roulette.apple-touch-icon.png" />
+    <style>
+        html, body {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+        #canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+            background: #000;
+        }
+
+        #status {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 0.4s ease;
+        }
+        #status-splash {
+            max-width: 40vw;
+            max-height: 30vh;
+            object-fit: contain;
+            margin-bottom: 24px;
+        }
+        #status-progress {
+            width: 300px;
+            height: 6px;
+            appearance: none;
+            border: none;
+            border-radius: 3px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.12);
+        }
+        #status-progress::-webkit-progress-bar {
+            background: rgba(255,255,255,0.12);
+        }
+        #status-progress::-webkit-progress-value {
+            background: #fff;
+            transition: width 0.15s linear;
+        }
+        #status-progress::-moz-progress-bar {
+            background: #fff;
+        }
+        #status-loading-label {
+            color: #cfcfcf;
+            font-family: monospace;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            margin-top: 12px;
+            min-height: 1.4em;
+        }
+        #status-notice {
+            display: none;
+            color: #ff5555;
+            font-family: monospace;
+            font-size: 13px;
+            text-align: center;
+            max-width: 80vw;
+            margin-top: 16px;
+            white-space: pre-wrap;
+        }
+    </style>
 </head>
 
 <body>
-    <script src="main.js"></script>
     <div id="loading-text" style="color: white; font-family: cursive; font-size: 48px; text-align: center; margin-top: 20px;">LOADING...</div>
     <canvas id="canvas"> Your browser does not support the canvas tag. </canvas>
     <noscript> Your browser does not support JavaScript. </noscript>
+
     <div id="status">
-        <img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="buckshot-roulette.png" alt="">
+        <img id="status-splash" src="https://raw.githubusercontent.com/genizy/web-port/main/buckshot-roulette/buckshot-roulette.png" alt="">
         <progress id="status-progress"></progress>
+        <div id="status-loading-label">preparing…</div>
         <div id="status-notice"></div>
     </div>
-    <script src="buckshot-roulette.js"></script>
-    <script>
-        const GODOT_CONFIG = {
-            "args": [],
-            "canvasResizePolicy": 2,
-            "ensureCrossOriginIsolationHeaders": false,
-            "executable": "buckshot-roulette",
-            "experimentalVK": false,
-            "fileSizes": {
-                "buckshot-roulette.pck": 344705792,
-                "buckshot-roulette.wasm": 43444261
-            },
-            "focusCanvas": false,
-            "gdextensionLibs": []
-        };
-        const GODOT_THREADS_ENABLED = false;
-        const engine = new Engine(GODOT_CONFIG);
 
-        function run() {
+    <script>
+        var REMOTE_BASE = "https://raw.githubusercontent.com/genizy/web-port/main/buckshot-roulette/";
+
+        // Rewrite relative fetch/XHR to raw GitHub.
+        var origFetch = window.fetch;
+        window.fetch = function (input, init) {
+            var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+            if (url && url.indexOf(REMOTE_BASE) !== 0 && !/^(https?:|blob:|data:)/i.test(url)) {
+                url = REMOTE_BASE + url.replace(/^\.?\/+/, "");
+            }
+            if (input && input.url && url !== input.url) input = new Request(url, input);
+            else if (typeof input === "string") input = url;
+            return origFetch.call(this, input, init);
+        };
+        var origOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            var u = String(url);
+            if (u.indexOf(REMOTE_BASE) !== 0 && !/^(https?:|blob:|data:)/i.test(u)) {
+                url = REMOTE_BASE + u.replace(/^\.?\/+/, "");
+            }
+            var args = Array.prototype.slice.call(arguments);
+            args[1] = url;
+            return origOpen.apply(this, args);
+        };
+
+        function loadScriptAsBlob(url) {
+            return new Promise(function (resolve, reject) {
+                fetch(url)
+                    .then(function (r) {
+                        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+                        return r.text();
+                    })
+                    .then(function (text) {
+                        var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+                        var s = document.createElement("script");
+                        s.src = blobUrl;
+                        s.onload = resolve;
+                        s.onerror = function () { reject(new Error("Failed to execute " + url)); };
+                        document.body.appendChild(s);
+                    })
+                    .catch(reject);
+            });
+        }
+
+        (async function () {
+            try {
+                await loadScriptAsBlob(REMOTE_BASE + "main.js");
+                await loadScriptAsBlob(REMOTE_BASE + "buckshot-roulette.js");
+                boot();
+            } catch (err) {
+                console.error("Script load failed: " + err.message);
+                var notice = document.getElementById('status-notice');
+                notice.style.display = 'block';
+                notice.textContent = "Failed to load: " + err.message;
+            }
+        })();
+
+        function boot() {
+            const GODOT_CONFIG = {
+                "args": [],
+                "canvasResizePolicy": 2,
+                "ensureCrossOriginIsolationHeaders": false,
+                "executable": "buckshot-roulette",
+                "experimentalVK": false,
+                "fileSizes": {
+                    "buckshot-roulette.pck": 344705792,
+                    "buckshot-roulette.wasm": 43444261
+                },
+                "focusCanvas": false,
+                "gdextensionLibs": []
+            };
+            const GODOT_THREADS_ENABLED = false;
+            const engine = new Engine(GODOT_CONFIG);
+
             const loadingText = document.getElementById('loading-text');
             const statusOverlay = document.getElementById('status');
             const statusProgress = document.getElementById('status-progress');
             const statusNotice = document.getElementById('status-notice');
-            loadingText.remove();
+            const statusLabel = document.getElementById('status-loading-label');
+
+            if (loadingText) loadingText.remove();
             let initializing = true;
             let statusMode = '';
+            const TOTAL_BYTES = 344705792 + 43444261;
 
             function setStatusMode(mode) {
-                if (statusMode === mode || !initializing) {
-                    return;
-                }
+                if (statusMode === mode || !initializing) return;
                 if (mode === 'hidden') {
-                    statusOverlay.remove();
+                    statusOverlay.style.opacity = '0';
+                    setTimeout(function () { statusOverlay.remove(); }, 400);
                     initializing = false;
                     return;
                 }
-                statusOverlay.style.visibility = 'visible';
-                statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+                statusOverlay.style.display = 'flex';
+                statusProgress.style.display = 'block';
                 statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
                 statusMode = mode;
             }
 
             function setStatusNotice(text) {
-                while (statusNotice.lastChild) {
-                    statusNotice.removeChild(statusNotice.lastChild);
-                }
-                const lines = text.split('\n');
-                lines.forEach((line) => {
+                while (statusNotice.lastChild) statusNotice.removeChild(statusNotice.lastChild);
+                text.split('\n').forEach(function (line) {
                     statusNotice.appendChild(document.createTextNode(line));
                     statusNotice.appendChild(document.createElement('br'));
                 });
@@ -76,68 +200,43 @@
 
             function displayFailureNotice(err) {
                 console.error(err);
-                if (err instanceof Error) {
-                    setStatusNotice(err.message);
-                } else if (typeof err === 'string') {
-                    setStatusNotice(err);
-                } else {
-                    setStatusNotice('An unknown error occurred.');
-                }
+                var msg = err instanceof Error ? err.message
+                        : (typeof err === 'string' ? err : 'An unknown error occurred.');
+                setStatusNotice(msg);
                 setStatusMode('notice');
                 initializing = false;
             }
-            const missing = Engine.getMissingFeatures({
-                threads: GODOT_THREADS_ENABLED,
-            });
+
+            const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
             if (missing.length !== 0) {
-                if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-                    let serviceWorkerRegistrationPromise;
-                    try {
-                        serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-                    } catch (err) {
-                        serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-                    }
-                    // There's a chance that installing the service worker would fix the issue
-                    Promise.race([
-                        serviceWorkerRegistrationPromise.then((registration) => {
-                            if (registration != null) {
-                                return Promise.reject(new Error('Service worker already exists.'));
-                            }
-                            return registration;
-                        }).then(() => engine.installServiceWorker()),
-                        // For some reason, `getRegistration()` can stall
-                        new Promise((resolve) => {
-                            setTimeout(() => resolve(), 2000);
-                        }),
-                    ]).then(() => {
-                        // Reload if there was no error.
-                        window.location.reload();
-                    }).catch((err) => {
-                        console.error('Error while registering service worker:', err);
-                    });
-                } else {
-                    // Display the message as usual
-                    const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-                    displayFailureNotice(missingMsg + missing.join('\n'));
-                }
+                const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+                displayFailureNotice(missingMsg + missing.join('\n'));
             } else {
                 setStatusMode('progress');
+                statusProgress.value = 0;
+                statusProgress.max = TOTAL_BYTES;
+                statusLabel.textContent = 'downloading…';
                 engine.startGame({
                     'onProgress': function (current, total) {
                         if (current > 0 && total > 0) {
                             statusProgress.value = current;
                             statusProgress.max = total;
+                            var pct = Math.round((current / total) * 100);
+                            var mb = (current / (1024 * 1024)).toFixed(1);
+                            var totalMb = (total / (1024 * 1024)).toFixed(1);
+                            statusLabel.textContent = mb + " / " + totalMb + " MB (" + pct + "%)";
                         } else {
                             statusProgress.removeAttribute('value');
                             statusProgress.removeAttribute('max');
+                            statusLabel.textContent = 'preparing…';
                         }
                     },
-                }).then(() => {
+                }).then(function () {
+                    statusLabel.textContent = 'ready';
                     setStatusMode('hidden');
                 }, displayFailureNotice);
             }
-        };
-        window.godotRunStart = run;
+        }
     </script>
 </body>
 
