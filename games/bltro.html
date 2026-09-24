@@ -6,12 +6,52 @@
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, minimum-scale=1, maximum-scale=1">
   <title>Balatro</title>
-  <base href="https://cdn.jsdelivr.net/gh/thirstygithub/mathamatic-notes@master/">
 
-  <!-- Load custom style sheet -->
-  <link rel="stylesheet" type="text/css" href="theme/love.css">
+  <link rel="stylesheet" type="text/css" href="https://raw.githubusercontent.com/thirstygithub/mathamatic-notes/master/theme/love.css">
 
-  <script src="consolewrapper.js"></script>
+  <style>
+    #log-panel {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      max-height: 45vh;
+      background: rgba(10, 10, 10, 0.94);
+      color: #d1d1d1;
+      font-family: monospace; font-size: 12px; line-height: 1.4;
+      border-top: 2px solid #8ec3e3;
+      z-index: 99999;
+      display: flex; flex-direction: column;
+      box-shadow: 0 -4px 12px rgba(0,0,0,0.6);
+    }
+    #log-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 10px; background: #1a2630;
+      font-weight: bold; user-select: none;
+    }
+    #log-header .title { color: #8ec3e3; letter-spacing: 1px; }
+    #log-actions button {
+      background: #444; color: #d1d1d1; border: 1px solid #555;
+      padding: 2px 8px; margin-left: 4px;
+      font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px;
+    }
+    #log-actions button:hover { background: #555; }
+    #log-body {
+      flex: 1; overflow-y: auto; padding: 8px 10px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    #log-body .line { padding: 1px 0; }
+    #log-body .line.error { color: #ff6b6b; }
+    #log-body .line.warn  { color: #ffd166; }
+    #log-body .line.info  { color: #8fd3f4; }
+    #log-body .line.net   { color: #b4e197; }
+    #log-toggle {
+      position: fixed; bottom: 8px; right: 8px;
+      background: #8ec3e3; color: #0b5675;
+      font-family: monospace; font-size: 12px; font-weight: bold;
+      border: none; padding: 6px 12px; border-radius: 4px;
+      cursor: pointer; z-index: 100000; display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+  </style>
+
   <script>
     if (typeof console !== 'undefined' && typeof console.debug !== 'function') {
       console.debug = console.log.bind(console);
@@ -20,28 +60,14 @@
     if (typeof window !== 'undefined') {
       if (typeof window.__getWebDB !== 'function') {
         window.__getWebDB = function(name) {
-          try {
-            return window.localStorage ? window.localStorage.getItem(name) : null;
-          } catch (err) {
-            if (__logger && __logger.warn) {
-              __logger.warn('Unable to access localStorage for __getWebDB:', err);
-            }
-            return null;
-          }
+          try { return window.localStorage ? window.localStorage.getItem(name) : null; }
+          catch (err) { if (__logger && __logger.warn) __logger.warn('__getWebDB failed:', err); return null; }
         };
       }
       if (typeof window.__setWebDB !== 'function') {
         window.__setWebDB = function(name, value) {
-          try {
-            if (window.localStorage) {
-              window.localStorage.setItem(name, value);
-              return true;
-            }
-          } catch (err) {
-            if (__logger && __logger.warn) {
-              __logger.warn('Unable to access localStorage for __setWebDB:', err);
-            }
-          }
+          try { if (window.localStorage) { window.localStorage.setItem(name, value); return true; } }
+          catch (err) { if (__logger && __logger.warn) __logger.warn('__setWebDB failed:', err); }
           return false;
         };
       }
@@ -52,30 +78,177 @@
 <body>
   <center>
     <div>
-      <!-- <h1>Balatro</h1> -->
       <canvas id="loadingCanvas" oncontextmenu="event.preventDefault()" width="800" height="600"></canvas>
       <canvas id="canvas" oncontextmenu="event.preventDefault()" width="100%" height="100%"></canvas>
     </div>
   </center>
 
-  <script type='text/javascript'>
+  <div id="log-panel">
+    <div id="log-header">
+      <span class="title">BALATRO · DEBUG LOG</span>
+      <span id="log-actions">
+        <button id="log-clear">Clear</button>
+        <button id="log-copy">Copy</button>
+        <button id="log-hide">✕</button>
+      </span>
+    </div>
+    <div id="log-body"></div>
+  </div>
+  <button id="log-toggle">Show Log</button>
+
+  <script>
+    (function () {
+      var logBody, logPanel, logToggle;
+      var maxLines = 500;
+
+      function ready(fn) {
+        if (document.readyState !== 'loading') fn();
+        else document.addEventListener('DOMContentLoaded', fn);
+      }
+      ready(function () {
+        logBody = document.getElementById('log-body');
+        logPanel = document.getElementById('log-panel');
+        logToggle = document.getElementById('log-toggle');
+
+        document.getElementById('log-clear').addEventListener('click', function () { logBody.innerHTML = ''; });
+        document.getElementById('log-copy').addEventListener('click', function () {
+          var text = logBody.innerText;
+          if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { appendLine('Log copied to clipboard.', 'info'); });
+          else {
+            var ta = document.createElement('textarea');
+            ta.value = text; document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); appendLine('Log copied.', 'info'); } catch (e) {}
+            document.body.removeChild(ta);
+          }
+        });
+        document.getElementById('log-hide').addEventListener('click', function () {
+          logPanel.style.display = 'none'; logToggle.style.display = 'block';
+        });
+        logToggle.addEventListener('click', function () {
+          logPanel.style.display = 'flex'; logToggle.style.display = 'none';
+        });
+
+        appendLine('Logger initialized.', 'info');
+        appendLine('location.href: ' + location.href, 'info');
+      });
+
+      function appendLine(text, cls) {
+        if (!logBody) return;
+        var div = document.createElement('div');
+        div.className = 'line' + (cls ? ' ' + cls : '');
+        div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+        logBody.appendChild(div);
+        while (logBody.children.length > maxLines) logBody.removeChild(logBody.firstChild);
+        logBody.scrollTop = logBody.scrollHeight;
+      }
+      window.__appendLog = appendLine;
+
+      var orig = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+      console.log   = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), '');      orig.log.apply(console, arguments); };
+      console.warn  = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'warn');  orig.warn.apply(console, arguments); };
+      console.error = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'error'); orig.error.apply(console, arguments); };
+      console.info  = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'info');  orig.info.apply(console, arguments); };
+
+      function fmt(x) {
+        if (typeof x === 'string') return x;
+        if (x instanceof Error) return x.name + ': ' + x.message + (x.stack ? '\n' + x.stack : '');
+        try { return JSON.stringify(x); } catch (e) { return String(x); }
+      }
+
+      window.addEventListener('error', function (e) {
+        var msg = (e.message || 'unknown error');
+        if (e.filename) msg += ' (' + e.filename + ':' + e.lineno + ')';
+        appendLine('UNCAUGHT: ' + msg, 'error');
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        appendLine('UNHANDLED REJECTION: ' + fmt(e.reason), 'error');
+      });
+
+      var origFetch = window.fetch ? window.fetch.bind(window) : null;
+      if (origFetch) {
+        window.fetch = function (input, init) {
+          var url = typeof input === 'string' ? input : (input && input.url ? input.url : String(input));
+          if (url.indexOf('blob:') !== 0) appendLine('FETCH ' + url, 'net');
+          return origFetch(input, init).then(function (res) {
+            var len = res.headers.get('Content-Length') || '?';
+            var enc = res.headers.get('Content-Encoding') || 'none';
+            var ct  = res.headers.get('Content-Type') || '?';
+            if (url.indexOf('blob:') !== 0) {
+              if (!res.ok) appendLine('  → HTTP ' + res.status + ' ' + res.statusText, 'error');
+              else appendLine('  → ' + res.status + ' len=' + len + ' enc=' + enc + ' ct=' + ct, 'net');
+            }
+            return res;
+          }).catch(function (err) {
+            if (url.indexOf('blob:') !== 0) appendLine('  → NETWORK FAIL: ' + err.message, 'error');
+            throw err;
+          });
+        };
+      }
+    })();
+  </script>
+
+  <script>
+    var REMOTE_BASE = "https://raw.githubusercontent.com/thirstygithub/mathamatic-notes/master/";
+
+    var origFetch = window.fetch;
+    window.fetch = function (input, init) {
+      var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+      if (url && url.indexOf(REMOTE_BASE) !== 0 && !/^(https?:|blob:|data:)/i.test(url)) {
+        url = REMOTE_BASE + url.replace(/^\.?\/+/, "").replace(/^\/+/, "");
+      }
+      if (input && input.url && url !== input.url) {
+        input = new Request(url, input);
+      } else if (typeof input === "string") {
+        input = url;
+      }
+      return origFetch.call(this, input, init);
+    };
+
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      var u = String(url);
+      if (u.indexOf(REMOTE_BASE) !== 0 && !/^(https?:|blob:|data:)/i.test(u)) {
+        url = REMOTE_BASE + u.replace(/^\.?\/+/, "").replace(/^\/+/, "");
+      }
+      var args = Array.prototype.slice.call(arguments);
+      args[1] = url;
+      return origOpen.apply(this, args);
+    };
+
+    console.info('Fetch/XHR interceptors installed. REMOTE_BASE=' + REMOTE_BASE);
+
+    (function () {
+      fetch(REMOTE_BASE + "consolewrapper.js")
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.text();
+        })
+        .then(function (text) {
+          console.info('consolewrapper.js fetched (' + text.length + ' bytes), injecting as blob');
+          var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+          var s = document.createElement("script");
+          s.src = blobUrl;
+          document.head.appendChild(s);
+        })
+        .catch(function (e) {
+          console.warn("consolewrapper.js failed: " + e.message);
+        });
+    })();
+  </script>
+
+  <script>
     window.callad = () => {
-      window.parent.postMessage({
-        type: 'adcall'
-      }, '*');
-    }
+      window.parent.postMessage({ type: 'adcall' }, '*');
+    };
     var canvas = document.getElementById("loadingCanvas");
     canvas.width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
     canvas.height = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
 
     function goFullScreen() {
       var canvas = document.getElementById("canvas");
-      if (canvas.requestFullScreen)
-        canvas.requestFullScreen();
-      else if (canvas.webkitRequestFullScreen)
-        canvas.webkitRequestFullScreen();
-      else if (canvas.mozRequestFullScreen)
-        canvas.mozRequestFullScreen();
+      if (canvas.requestFullScreen) canvas.requestFullScreen();
+      else if (canvas.webkitRequestFullScreen) canvas.webkitRequestFullScreen();
+      else if (canvas.mozRequestFullScreen) canvas.mozRequestFullScreen();
     }
 
     function FullScreenHook() {
@@ -87,89 +260,134 @@
 
     function drawLoadingText(text) {
       var canvas = loadingContext.canvas;
-
       loadingContext.fillStyle = "rgb(142, 195, 227)";
       loadingContext.fillRect(0, 0, canvas.scrollWidth, canvas.scrollHeight);
-
       loadingContext.font = '2em arial';
-      loadingContext.textAlign = 'center'
+      loadingContext.textAlign = 'center';
       loadingContext.fillStyle = "rgb( 11, 86, 117 )";
       loadingContext.fillText(text, canvas.scrollWidth / 2, canvas.scrollHeight / 2);
-
-      // loadingContext.fillText("Powered By Emscripten.", canvas.scrollWidth / 2, canvas.scrollHeight / 4);
-      // loadingContext.fillText("Powered By LÖVE.", canvas.scrollWidth / 2, canvas.scrollHeight / 4 * 3);
     }
 
-    window.onload = function() {
-      window.focus();
-    };
-    window.onclick = function() {
-      window.focus();
-    };
+    window.onload = function () { window.focus(); };
+    window.onclick = function () { window.focus(); };
 
-    window.addEventListener("keydown", function(e) {
-      // space and arrow keys
+    window.addEventListener("keydown", function (e) {
       if ([32, 37, 38, 39, 40].indexOf(e.keyCode) > -1) {
         e.preventDefault();
       }
     }, false);
 
     var Module = {
+      // IMPORTANT: this stays as "./data". Emscripten preloads the game's
+      // files into its virtual filesystem during boot (see the log:
+      // "Preloading assets... N/284" -> "All assets loaded"). LÖVE reads
+      // from the VFS, not from URLs. Passing a URL here makes LÖVE look
+      // for a directory literally named "https://..." inside the VFS,
+      // which is why the previous attempt failed.
       arguments: ["./data"],
       INITIAL_MEMORY: 256000000,
       printErr: console.error.bind(console),
-      canvas: (function() {
+      canvas: (function () {
         var canvas = document.getElementById('canvas');
-
-        // As a default initial behavior, pop up an alert when webgl context is lost. To make your
-        // application robust, you may want to override this behavior before shipping!
-        // See http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
-        canvas.addEventListener("webglcontextlost", function(e) {
+        canvas.addEventListener("webglcontextlost", function (e) {
           alert('WebGL context lost. You will need to reload the page.');
           e.preventDefault();
         }, false);
-
         return canvas;
       })(),
-      setStatus: function(text) {
+      setStatus: function (text) {
         if (text) {
+          // Suppress the noisy "Preparing... (N/569)" spam — only log milestones.
+          if (!/^Preparing\.\.\. \(\d+\/\d+\)$/.test(text) &&
+              !/^Preloading assets\.\.\. \(\d+\/\d+\)$/.test(text)) {
+            console.info('Module.setStatus: ' + text);
+          }
           drawLoadingText(text);
         } else if (Module.remainingDependencies === 0) {
+          console.info('Module.setStatus: done. Hiding loading canvas.');
           document.getElementById('loadingCanvas').style.display = 'none';
           document.getElementById('canvas').style.visibility = 'visible';
         }
       },
       totalDependencies: 0,
       remainingDependencies: 0,
-      monitorRunDependencies: function(left) {
+      monitorRunDependencies: function (left) {
         this.remainingDependencies = left;
         this.totalDependencies = Math.max(this.totalDependencies, left);
         Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
       }
     };
     Module.setStatus('Downloading...');
-    window.onerror = function(event) {
-      // TODO: do not warn on ok events like simulating an infinite loop or exitStatus
+    window.onerror = function (event) {
       Module.setStatus('Exception thrown, see JavaScript console');
-      Module.setStatus = function(text) {
+      Module.setStatus = function (text) {
         if (text) Module.printErr('[post-exception status] ' + text);
       };
     };
 
-    var applicationLoad = function(e) {
-      Love(Module);
-    }
+    var applicationLoad = function (e) {
+      console.info('applicationLoad called — Love(Module) starting');
+      try {
+        Love(Module);
+      } catch (err) {
+        console.error('Love() threw: ' + (err && err.message ? err.message : err));
+      }
+    };
   </script>
-  <script type="text/javascript" src="game.js"></script>
-  <script async type="text/javascript" src="love.js" onload="applicationLoad(this)"></script>
-  <!-- <footer>
-      <p>Built with <a href="https://github.com/Davidobot/love.js">love.js</a> <button onclick="goFullScreen();">Go Fullscreen</button><br>Hint: Reload the page if screen is blank</p>
-    </footer> -->
+
+  <script>
+    (function loadAsBlob(name, onload) {
+      console.info('Loading ' + name + ' as blob...');
+      fetch(REMOTE_BASE + name)
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status + " for " + name);
+          return r.text();
+        })
+        .then(function (text) {
+          console.info(name + ' fetched (' + text.length + ' bytes). Injecting...');
+          var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+          var s = document.createElement("script");
+          s.src = blobUrl;
+          s.onload = function () {
+            console.info(name + ' executed.');
+            if (onload) onload();
+          };
+          s.onerror = function () {
+            console.error(name + ' failed to execute.');
+          };
+          document.body.appendChild(s);
+        })
+        .catch(function (e) {
+          console.error(name + ' failed: ' + e.message);
+        });
+    })("game.js", function () {
+      (function () {
+        console.info('Loading love.js as blob...');
+        fetch(REMOTE_BASE + "love.js")
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status + " for love.js");
+            return r.text();
+          })
+          .then(function (text) {
+            console.info('love.js fetched (' + text.length + ' bytes). Injecting...');
+            var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+            var s = document.createElement("script");
+            s.src = blobUrl;
+            s.onload = function () {
+              console.info('love.js executed. Calling applicationLoad...');
+              applicationLoad(s);
+            };
+            s.onerror = function () {
+              console.error('love.js failed to execute.');
+            };
+            document.body.appendChild(s);
+          })
+          .catch(function (e) {
+            console.error("love.js failed: " + e.message);
+          });
+      })();
+    });
+  </script>
 </body>
 
-
 </html>
-
-
-
-
