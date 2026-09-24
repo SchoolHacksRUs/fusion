@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>Hollow Knight</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #231F20;
+    }
+    #unity-container {
+      width: 100%;
+      height: 100%;
+      position: fixed;
+      top: 0; left: 0;
+    }
+    #loading-wrap {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+    #loading-text {
+      color: white;
+      font-size: 48px;
+      font-family: cursive;
+      text-align: center;
+      margin: 0 0 10px 0;
+    }
+    #loading-log {
+      color: #aaa;
+      font-size: 13px;
+      font-family: monospace;
+      text-align: center;
+      margin: 0;
+      min-height: 18px;
+      letter-spacing: 0.3px;
+    }
+    #unity-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+    #unity-loading-bar { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+    #unity-progress-bar-empty { width: 200px; height: 12px; background: rgba(255,255,255,0.15); border: 1px solid #fff; border-radius: 3px; overflow: hidden; }
+    #unity-progress-bar-full { height: 100%; width: 0%; background: #fff; transition: width 0.15s linear; }
+    #unity-mobile-warning { display: none; color: #fff; font-family: system-ui, sans-serif; text-align: center; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div id="loading-wrap">
+    <div id="loading-text">LOADING...</div>
+    <div id="loading-log">initializing</div>
+  </div>
+  <div hidden id="unity-container" class="unity-desktop">
+    <canvas id="unity-canvas"></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+    </div>
+    <div id="unity-mobile-warning">WebGL builds are not supported on mobile devices.</div>
+  </div>
+
+  <script>
+    var REMOTE_BASE = "https://raw.githubusercontent.com/SchoolHacksRUs/Hollow-Knight/main/";
+
+    var loadingWrap = document.getElementById("loading-wrap");
+    var loadingText = document.getElementById("loading-text");
+    var loadingLog  = document.getElementById("loading-log");
+
+    function setLog(msg) {
+      loadingLog.textContent = msg;
+    }
+
+    (async () => {
+      const FILES = [
+        "Blacksmith.mp4",
+        "CharmSlugKiss.mp4",
+        "FinalA.mp4",
+        "FinalB.mp4",
+        "FinalC.mp4",
+        "FinalD.mp4",
+        "FinalE.mp4",
+        "Fountain.mp4",
+        "Intro.mp4",
+        "MaskShatter.mp4",
+        "MrMushroom.mp4",
+        "Nailsmith.mp4",
+        "NailsmithPaint.mp4",
+        "Prologue.mp4",
+        "StagTunnelRun.mp4",
+        "Telescope.mp4"
+      ].map(f => "StreamingAssets/" + f);
+
+      const DB_NAME = "asset-cache";
+      const STORE_NAME = "files";
+
+      function openDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      function saveFile(db, key, blob) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, "readwrite");
+          tx.objectStore(STORE_NAME).put(blob, key);
+          tx.oncomplete = resolve;
+          tx.onerror = reject;
+        });
+      }
+      function getFile(db, key) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, "readonly");
+          const req = tx.objectStore(STORE_NAME).get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = reject;
+        });
+      }
+
+      try {
+        const db = await openDB();
+        let done = 0;
+        setLog('caching streaming assets (0/' + FILES.length + ')');
+
+        await Promise.all(FILES.map(async (rel) => {
+          const cached = await getFile(db, rel);
+          if (cached) { done++; setLog('caching streaming assets (' + done + '/' + FILES.length + ')'); return; }
+          try {
+            const res = await fetch(REMOTE_BASE + rel);
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            const blob = await res.blob();
+            await saveFile(db, rel, blob);
+          } catch (e) {
+            console.warn("StreamingAssets failed:", rel, e.message);
+          }
+          done++;
+          setLog('caching streaming assets (' + done + '/' + FILES.length + ')');
+        }));
+
+        const originalFetch = window.fetch;
+        window.fetch = async function (resource, options) {
+          if (typeof resource === "string") {
+            for (const rel of FILES) {
+              if (resource === rel || resource.endsWith("/" + rel) || resource.endsWith(rel)) {
+                const cached = await getFile(db, rel);
+                if (cached) return new Response(cached);
+              }
+            }
+          }
+          return originalFetch(resource, options);
+        };
+      } catch (e) {
+        console.warn('StreamingAssets cache unavailable:', e.message);
+      }
+    })();
+
+    const DB_NAME = "cachedb";
+    const STORE_NAME = "V1.10";
+
+    function openCacheDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    async function saveToCache(key, blob) {
+      const db = await openCacheDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).put(blob, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    async function loadFromCache(key) {
+      const db = await openCacheDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const req = tx.objectStore(STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    async function deleteFromCache(key) {
+      const db = await openCacheDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    let loadedBytes = 0;
+
+    async function fetchWithProgress(url, label) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+      const reader = response.body.getReader();
+      let chunks = [];
+      let received = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.length;
+        loadedBytes += value.length;
+        chunks.push(value);
+        let mbDone = (loadedBytes / (1024 * 1024)).toFixed(1);
+        loadingText.textContent = "LOADING... " + mbDone + " MB / 886.7 MB";
+        setLog(label);
+      }
+      let fullBuffer = new Uint8Array(received);
+      let offset = 0;
+      for (let chunk of chunks) { fullBuffer.set(chunk, offset); offset += chunk.length; }
+      return fullBuffer.buffer;
+    }
+
+    async function mergeFiles(fileParts, cacheKey, mimeType, label) {
+      const cached = await loadFromCache(cacheKey);
+      if (cached) {
+        setLog(label + ' (cached)');
+        return URL.createObjectURL(cached);
+      }
+      const buffers = await Promise.all(fileParts.map((part, i) =>
+        fetchWithProgress(part, label + ' part ' + (i + 1) + '/' + fileParts.length)
+      ));
+      const mergedBlob = new Blob(buffers, { type: mimeType });
+      await saveToCache(cacheKey, mergedBlob);
+      return URL.createObjectURL(mergedBlob);
+    }
+
+    function getParts(file, start, end) {
+      let parts = [];
+      for (let i = start; i <= end; i++) parts.push(REMOTE_BASE + file + ".part" + i);
+      return parts;
+    }
+
+    async function fetchAsJsBlob(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status + " for " + url);
+      const text = await res.text();
+      return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+    }
+
+    (async () => {
+      try {
+        setLog('fetching payloads');
+
+        const [dataUrl, wasmUrl] = await Promise.all([
+          mergeFiles(getParts("Build/Glitches HK.data", 1, 44), "Glitches HK.data", "application/octet-stream", "data"),
+          mergeFiles(getParts("Build/Glitches HK.wasm", 1, 3), "Glitches HK.wasm", "application/wasm", "wasm")
+        ]);
+
+        setLog('fetching loader + framework');
+
+        var buildUrl = REMOTE_BASE + "Build";
+        var loaderUrl    = buildUrl + "/Glitches HK.loader.js";
+        var frameworkUrl = buildUrl + "/Glitches HK.framework.js";
+
+        const [loaderBlobUrl, frameworkBlobUrl] = await Promise.all([
+          fetchAsJsBlob(loaderUrl),
+          fetchAsJsBlob(frameworkUrl)
+        ]);
+
+        setLog('injecting loader');
+
+        await new Promise((resolve, reject) => {
+          var script = document.createElement("script");
+          script.src = loaderBlobUrl;
+          script.onload = resolve;
+          script.onerror = () => reject(new Error("Failed to execute loader"));
+          document.body.appendChild(script);
+        });
+
+        var config = {
+          dataUrl: dataUrl,
+          frameworkUrl: frameworkBlobUrl,
+          codeUrl: wasmUrl,
+          streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
+          companyName: "Stratus Dev Ports",
+          productName: "Hollow Knight",
+          productVersion: "Perfect Port"
+        };
+
+        var container = document.querySelector("#unity-container");
+        container.hidden = false;
+        var canvas = document.querySelector("#unity-canvas");
+        var loadingBar = document.querySelector("#unity-loading-bar");
+        var progressBarFull = document.querySelector("#unity-progress-bar-full");
+        var mobileWarning = document.querySelector("#unity-mobile-warning");
+
+        if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+          container.className = "unity-mobile";
+          config.devicePixelRatio = 1;
+          mobileWarning.style.display = "block";
+          setTimeout(() => { mobileWarning.style.display = "none"; }, 5000);
+        } else {
+          function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            canvas.style.width = window.innerWidth + "px";
+            canvas.style.height = window.innerHeight + "px";
+          }
+          resizeCanvas();
+          window.addEventListener('resize', resizeCanvas);
+        }
+
+        loadingBar.style.display = "block";
+        setLog('booting engine');
+
+        createUnityInstance(canvas, config, (progress) => {
+          progressBarFull.style.width = 100 * progress + "%";
+          setLog('booting engine ' + Math.round(progress * 100) + '%');
+        }).then((unityInstance) => {
+          loadingWrap.remove();
+          loadingBar.style.display = "none";
+          canvas.style.display = "block";
+        }).catch(async (message) => {
+          await deleteFromCache("Glitches HK.wasm");
+          setLog('FAILED: ' + message);
+        });
+      } catch (err) {
+        setLog('FAILED: ' + (err && err.message ? err.message : err));
+      }
+    })();
+  </script>
+</body>
+</html>
