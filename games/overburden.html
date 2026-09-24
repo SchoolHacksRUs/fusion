@@ -26,8 +26,13 @@ body{color:white;background-color:black;overflow:hidden;touch-action:none;displa
 </div>
 <script>
 (function () {
+  // -------------------------------------------------------------
+  //  Raw GitHub base. jsDelivr rejects this repo (or its parts
+  //  exceed jsDelivr's size cap), so all assets come from raw GitHub.
+  // -------------------------------------------------------------
   const HASH = 'd1f2b598eae70ca98a4da3f1fdccc01900b61ead';
-  const BASE  = 'https://cdn.jsdelivr.net/gh/shayderrr/stardew_decomp@' + HASH + '/web/';
+  const BASE = 'https://raw.githubusercontent.com/shayderrr/stardew_decomp/' + HASH + '/web/';
+
   const GODOT_CONFIG = {
     args: [],
     canvasResizePolicy: 2,
@@ -38,12 +43,15 @@ body{color:white;background-color:black;overflow:hidden;touch-action:none;displa
     gdextensionLibs: [],
     godotPoolSize: 4,
   };
+
   const statusOverlay  = document.getElementById('status');
   const statusProgress = document.getElementById('status-progress');
   const statusNotice   = document.getElementById('status-notice');
   const statusSplash   = document.getElementById('status-splash');
+
   const TOTAL_PARTS = 10;
   let loadedParts = 0;
+
   function setStatusMode(mode) {
     statusOverlay.style.visibility = 'visible';
     statusProgress.style.display   = mode === 'progress' ? 'block' : 'none';
@@ -54,13 +62,30 @@ body{color:white;background-color:black;overflow:hidden;touch-action:none;displa
     statusNotice.innerText     = text;
     statusNotice.style.display = 'block';
   }
+
+  // Fetch a JS file as text and wrap it in a blob with the correct MIME.
+  // Raw GitHub serves .js as text/plain, which blocks <script src>.
+  async function loadScriptAsBlob(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+    const text = await r.text();
+    const blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+    await new Promise(function (resolve, reject) {
+      const s = document.createElement("script");
+      s.src = blobUrl;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error("Failed to execute " + url)); };
+      document.head.appendChild(s);
+    });
+  }
+
   async function fetchAndMerge(filename, count) {
     const parts = [];
     let totalLength = 0;
     for (let i = 1; i <= count; i++) {
       const url      = BASE + filename + '.part' + i;
       const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to download ' + url);
+      if (!response.ok) throw new Error('Failed to download ' + url + ' (HTTP ' + response.status + ')');
       const buf = await response.arrayBuffer();
       parts.push(buf);
       totalLength += buf.byteLength;
@@ -77,21 +102,24 @@ body{color:white;background-color:black;overflow:hidden;touch-action:none;displa
     }
     return merged.buffer;
   }
+
   async function start() {
     try {
       statusSplash.src = BASE + 'Overburden.png';
       setStatusMode('progress');
-      await new Promise(function (resolve, reject) {
-        const script   = document.createElement('script');
-        script.src     = BASE + 'Overburden.js';
-        script.onload  = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
+
+      // Load the engine loader as a blob (raw GitHub's text/plain MIME
+      // would otherwise block <script src>).
+      await loadScriptAsBlob(BASE + 'Overburden.js');
+
       const wasmBuffer = await fetchAndMerge('Overburden.wasm', 2);
       const pckBuffer  = await fetchAndMerge('Overburden.pck',  8);
       setStatusNotice('Initializing...');
+
       const engine = new Engine(GODOT_CONFIG);
+
+      // Serve the merged buffers back through a fetch interceptor so
+      // Godot's own loader picks them up.
       const _origFetch = window.fetch;
       window.fetch = function (url, opts) {
         if (typeof url === 'string') {
@@ -110,6 +138,7 @@ body{color:white;background-color:black;overflow:hidden;touch-action:none;displa
         }
         return _origFetch.apply(this, arguments);
       };
+
       await engine.init(BASE);
       engine.copyToFS('/Overburden.pck', pckBuffer);
       await engine.startGame({
