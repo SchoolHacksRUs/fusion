@@ -4,11 +4,8 @@
     <meta charset="utf-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <title>Unity WebGL Player | boil Noodles at Night</title>
-    <base
-      href="https://cdn.jsdelivr.net/gh/SomeRandomFella/portsandrips@master/boilnoodles/"
-    />
-    <link rel="shortcut icon" href="TemplateData/favicon.ico" />
-    <link rel="stylesheet" href="TemplateData/style.css" />
+    <link rel="shortcut icon" href="https://raw.githubusercontent.com/SomeRandomFella/portsandrips/master/boilnoodles/TemplateData/favicon.ico" />
+    <link rel="stylesheet" href="https://raw.githubusercontent.com/SomeRandomFella/portsandrips/master/boilnoodles/TemplateData/style.css" />
   </head>
   <body>
     <div id="unity-container" class="unity-desktop">
@@ -55,12 +52,37 @@
         updateBannerVisibility();
       }
 
-      var buildUrl = "Build";
+      // Raw GitHub base. jsDelivr's repo-total-size cap rejects this repo
+      // (portsandrips contains many ports). Raw GitHub has no such cap.
+      var REMOTE_BASE = "https://raw.githubusercontent.com/SomeRandomFella/portsandrips/master/boilnoodles/";
+      var buildUrl = REMOTE_BASE + "Build";
+
+      // Fetch a remote JS file as text and wrap in a blob with correct MIME.
+      // Raw GitHub serves .js as text/plain, which browsers refuse to execute
+      // as <script src> and which Unity refuses to use as a framework URL.
+      async function fetchAsJsBlob(url) {
+        var r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        var text = await r.text();
+        return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+      }
+
+      // Fetch a remote binary file as a Blob with the given MIME type.
+      async function fetchAsBlob(url, mimeType) {
+        var r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        var buf = await r.arrayBuffer();
+        return URL.createObjectURL(new Blob([buf], { type: mimeType }));
+      }
+
       var loaderUrl = buildUrl + "/WebGLBuild.loader.js";
+
+      // Start with no URLs — they're resolved asynchronously below.
       var config = {
-        frameworkUrl: buildUrl + "/WebGLBuild.framework.js",
-        dataUrl: buildUrl + "/WebGLBuild.data",
-        streamingAssetsUrl: "StreamingAssets",
+        frameworkUrl: null,
+        dataUrl: null,
+        codeUrl: null,
+        streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
         companyName: "arydk",
         productName: "boil Noodles at Night",
         productVersion: "0.1",
@@ -78,14 +100,18 @@
 
       loadingBar.style.display = "block";
 
+      // Merge the split wasm parts into a single Blob with application/wasm
+      // so WebAssembly.instantiateStreaming accepts the blob URL.
       function fetchAndMergeWasm() {
         return Promise.all([
-          fetch(buildUrl + "/WebGLBuild.wasm.part001").then((r) =>
-            r.arrayBuffer(),
-          ),
-          fetch(buildUrl + "/WebGLBuild.wasm.part002").then((r) =>
-            r.arrayBuffer(),
-          ),
+          fetch(buildUrl + "/WebGLBuild.wasm.part001").then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status + " for wasm.part001");
+            return r.arrayBuffer();
+          }),
+          fetch(buildUrl + "/WebGLBuild.wasm.part002").then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status + " for wasm.part002");
+            return r.arrayBuffer();
+          }),
         ]).then(function (buffers) {
           var total = buffers.reduce(function (s, b) {
             return s + b.byteLength;
@@ -96,34 +122,50 @@
             merged.set(new Uint8Array(b), offset);
             offset += b.byteLength;
           });
-          return new Blob([merged], { type: "application/wasm" });
+          return URL.createObjectURL(new Blob([merged], { type: "application/wasm" }));
         });
       }
 
-      var script = document.createElement("script");
-      script.src = loaderUrl;
-      script.onload = function () {
-        fetchAndMergeWasm()
-          .then(function (wasmBlob) {
-            config.codeUrl = URL.createObjectURL(wasmBlob);
-            createUnityInstance(canvas, config, function (progress) {
-              progressBarFull.style.width = 100 * progress + "%";
-            })
-              .then(function (unityInstance) {
-                loadingBar.style.display = "none";
-                fullscreenButton.onclick = function () {
-                  unityInstance.SetFullscreen(1);
-                };
-              })
-              .catch(function (message) {
-                alert(message);
-              });
-          })
-          .catch(function (err) {
-            alert("Failed to load wasm parts: " + err);
+      (async function () {
+        try {
+          // 1) Fetch the loader as a blob and inject it so it executes.
+          var loaderBlobUrl = await fetchAsJsBlob(loaderUrl);
+          await new Promise(function (resolve, reject) {
+            var s = document.createElement("script");
+            s.src = loaderBlobUrl;
+            s.onload = resolve;
+            s.onerror = function () { reject(new Error("Failed to execute loader")); };
+            document.head.appendChild(s);
           });
-      };
-      document.body.appendChild(script);
+
+          // 2) Fetch and blob-wrap the framework so Unity accepts it.
+          config.frameworkUrl = await fetchAsJsBlob(buildUrl + "/WebGLBuild.framework.js");
+
+          // 3) Fetch and blob-wrap the data file with explicit MIME.
+          config.dataUrl = await fetchAsBlob(buildUrl + "/WebGLBuild.data", "application/octet-stream");
+
+          // 4) Fetch, merge, and blob-wrap the split wasm parts.
+          config.codeUrl = await fetchAndMergeWasm();
+
+          // 5) Boot.
+          createUnityInstance(canvas, config, function (progress) {
+            progressBarFull.style.width = 100 * progress + "%";
+          })
+            .then(function (unityInstance) {
+              loadingBar.style.display = "none";
+              fullscreenButton.onclick = function () {
+                unityInstance.SetFullscreen(1);
+              };
+            })
+            .catch(function (message) {
+              alert(message);
+            });
+
+        } catch (err) {
+          alert("Load failed: " + (err && err.message ? err.message : err));
+          console.error(err);
+        }
+      })();
     </script>
   </body>
 </html>
