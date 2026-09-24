@@ -4,19 +4,13 @@
     <meta charset="utf-8" />
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <title>Unity WebGL Player | CheeseRolling</title>
-    <base
-      href="https://cdn.jsdelivr.net/gh/SomeRandomFella/portsandrips@master/CheeseRollingWeb/"
-    />
-    <link rel="shortcut icon" href="TemplateData/favicon.ico" />
-    <link rel="stylesheet" href="TemplateData/style.css" />
-    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="shortcut icon" href="https://raw.githubusercontent.com/SomeRandomFella/portsandrips/master/CheeseRollingWeb/TemplateData/favicon.ico" />
+    <link rel="stylesheet" href="https://raw.githubusercontent.com/SomeRandomFella/portsandrips/master/CheeseRollingWeb/TemplateData/style.css" />
     <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
       #part-loader {
         position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        top: 0; left: 0; right: 0; bottom: 0;
         background: white;
         z-index: 9999;
         display: flex;
@@ -25,38 +19,20 @@
         justify-content: center;
         font-family: "Comic Sans MS", "Comic Sans", cursive;
       }
-      #part-loader h1 {
-        font-size: 2em;
-        margin-bottom: 20px;
-      }
-      .part-item {
-        width: 400px;
-        margin: 6px 0;
-        font-size: 1em;
-      }
-      .part-label {
-        margin-bottom: 3px;
-      }
-      .part-bar-bg {
-        width: 100%;
-        height: 18px;
-        background: #ddd;
-        border: 2px solid black;
-      }
-      .part-bar-fill {
-        height: 100%;
-        background: #f5c518;
-        width: 0%;
-        transition: width 0.1s;
-      }
-      .part-status {
-        font-size: 0.85em;
-        color: #555;
-      }
-      #overall-status {
-        margin-top: 20px;
-        font-size: 1.1em;
-      }
+      #part-loader h1 { font-size: 2em; margin-bottom: 20px; }
+      .part-item { width: 400px; margin: 6px 0; font-size: 1em; }
+      .part-label { margin-bottom: 3px; }
+      .part-bar-bg { width: 100%; height: 18px; background: #ddd; border: 2px solid black; }
+      .part-bar-fill { height: 100%; background: #f5c518; width: 0%; transition: width 0.1s; }
+      .part-status { font-size: 0.85em; color: #555; }
+      #overall-status { margin-top: 20px; font-size: 1.1em; }
+
+      #unity-container { position: fixed; inset: 0; width: 100%; height: 100%; }
+      #unity-canvas { width: 100% !important; height: 100% !important; display: block; background: #000; }
+      #unity-loading-bar { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+      #unity-progress-bar-empty { width: 200px; height: 12px; background: rgba(255,255,255,0.15); border: 1px solid #fff; border-radius: 3px; overflow: hidden; }
+      #unity-progress-bar-full { height: 100%; width: 0%; background: #fff; transition: width 0.15s linear; }
+      #unity-warning { position: absolute; left: 50%; top: 5%; transform: translateX(-50%); background: #f90; padding: 10px; display: none; z-index: 12; }
     </style>
   </head>
   <body>
@@ -78,9 +54,26 @@
     </div>
 
     <script>
-      alert(
-        "multiplayer is a bit buggy and laggy if anything multiplayer related breaks js refresh | ported by sexyplankton",
-      );
+      // -------------------------------------------------------------
+      //  Raw GitHub base. portsandrips is a large multi-port repo that
+      //  exceeds jsDelivr's total-size cap, so every asset comes from
+      //  raw GitHub instead.
+      // -------------------------------------------------------------
+      var REMOTE_BASE = "https://raw.githubusercontent.com/SomeRandomFella/portsandrips/master/CheeseRollingWeb/";
+
+      // Rewrite any relative fetch to the CDN. The part-count and part-fetch
+      // logic below builds URLs like "Build/CheeseRollingWeb.data.part001",
+      // so this puts them on raw GitHub.
+      var origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+        if (url && url.indexOf(REMOTE_BASE) !== 0 && !/^(https?:|blob:|data:)/i.test(url)) {
+          url = REMOTE_BASE + url.replace(/^\.?\/+/, "");
+        }
+        if (input && input.url && url !== input.url) input = new Request(url, input);
+        else if (typeof input === "string") input = url;
+        return origFetch.call(this, input, init);
+      };
 
       const PART_FILES = [
         { base: "Build/CheeseRollingWeb.data", label: "CheeseRolling.data" },
@@ -119,10 +112,7 @@
           if (!res.ok) break;
           n++;
         }
-        if (n === 1) {
-          return 0;
-        }
-        return n - 1;
+        return n === 1 ? 0 : n - 1;
       }
 
       async function fetchPart(url, onProgress) {
@@ -167,7 +157,11 @@
           blobs.push(blob);
         }
 
-        return new Blob(blobs);
+        // Explicit MIME types on the merged blobs: wasm must be
+        // application/wasm for instantiateStreaming, data must be
+        // application/octet-stream for Unity's loader.
+        const mime = /\.wasm$/i.test(base) ? "application/wasm" : "application/octet-stream";
+        return new Blob(blobs, { type: mime });
       }
 
       async function loadAllParts() {
@@ -190,33 +184,22 @@
         document.getElementById("part-loader").style.display = "none";
         document.getElementById("unity-container").style.display = "";
 
-        window.addEventListener("load", function () {
-          if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("ServiceWorker.js");
-          }
-        });
-
         var container = document.querySelector("#unity-container");
         var canvas = document.querySelector("#unity-canvas");
         var loadingBar = document.querySelector("#unity-loading-bar");
-        var progressBarFull = document.querySelector(
-          "#unity-progress-bar-full",
-        );
+        var progressBarFull = document.querySelector("#unity-progress-bar-full");
         var warningBanner = document.querySelector("#unity-warning");
 
         function unityShowBanner(msg, type) {
           function updateBannerVisibility() {
-            warningBanner.style.display = warningBanner.children.length
-              ? "block"
-              : "none";
+            warningBanner.style.display = warningBanner.children.length ? "block" : "none";
           }
           var div = document.createElement("div");
           div.innerHTML = msg;
           warningBanner.appendChild(div);
           if (type == "error") div.style = "background: red; padding: 10px;";
           else {
-            if (type == "warning")
-              div.style = "background: yellow; padding: 10px;";
+            if (type == "warning") div.style = "background: yellow; padding: 10px;";
             setTimeout(function () {
               warningBanner.removeChild(div);
               updateBannerVisibility();
@@ -225,17 +208,13 @@
           updateBannerVisibility();
         }
 
-        var buildUrl = "Build";
+        var buildUrl = REMOTE_BASE + "Build";
         var loaderUrl = buildUrl + "/CheeseRollingWeb.loader.js";
         var config = {
-          dataUrl:
-            assembledBlobs["Build/CheeseRollingWeb.data"] ||
-            buildUrl + "/CheeseRollingWeb.data",
+          dataUrl: assembledBlobs["Build/CheeseRollingWeb.data"],
           frameworkUrl: buildUrl + "/CheeseRollingWeb.framework.js",
-          codeUrl:
-            assembledBlobs["Build/CheeseRollingWeb.wasm"] ||
-            buildUrl + "/CheeseRollingWeb.wasm",
-          streamingAssetsUrl: "StreamingAssets",
+          codeUrl: assembledBlobs["Build/CheeseRollingWeb.wasm"],
+          streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
           companyName: "The Interviewed",
           productName: "CheeseRolling",
           productVersion: "v1.5.1",
@@ -245,27 +224,49 @@
         if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
           var meta = document.createElement("meta");
           meta.name = "viewport";
-          meta.content =
-            "width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes";
+          meta.content = "width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes";
           document.getElementsByTagName("head")[0].appendChild(meta);
         }
 
         loadingBar.style.display = "block";
 
-        var script = document.createElement("script");
-        script.src = loaderUrl;
-        script.onload = () => {
-          createUnityInstance(canvas, config, (progress) => {
-            progressBarFull.style.width = 100 * progress + "%";
-          })
-            .then((unityInstance) => {
+        // Fetch loader and framework as blobs so raw GitHub's text/plain
+        // MIME doesn't block execution.
+        async function loadAsJsBlob(url) {
+          var r = await origFetch(url);
+          if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+          var text = await r.text();
+          return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+        }
+
+        (async function () {
+          try {
+            // Framework as a blob (Unity loads it as a script).
+            config.frameworkUrl = await loadAsJsBlob(buildUrl + "/CheeseRollingWeb.framework.js");
+
+            // Loader as a blob, then inject.
+            var loaderBlobUrl = await loadAsJsBlob(loaderUrl);
+            await new Promise(function (resolve, reject) {
+              var script = document.createElement("script");
+              script.src = loaderBlobUrl;
+              script.onload = resolve;
+              script.onerror = function () { reject(new Error("Failed to execute loader")); };
+              document.head.appendChild(script);
+            });
+
+            createUnityInstance(canvas, config, function (progress) {
+              progressBarFull.style.width = 100 * progress + "%";
+            }).then(function (unityInstance) {
               loadingBar.style.display = "none";
-            })
-            .catch((message) => {
+            }).catch(function (message) {
+              console.error("createUnityInstance failed:", message);
               alert(message);
             });
-        };
-        document.body.appendChild(script);
+          } catch (err) {
+            console.error("startUnity failed:", err);
+            alert("Load failed: " + (err && err.message ? err.message : err));
+          }
+        })();
       }
 
       loadAllParts();
