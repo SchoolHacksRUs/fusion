@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>Gang Beasts</title>
-    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/SchoolHacksRUs/GangBeast-WebPort@main/TemplateData/favicon.ico">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/SchoolHacksRUs/GangBeast-WebPort@main/TemplateData/style.css">
+    <link rel="shortcut icon" href="https://raw.githubusercontent.com/SchoolHacksRUs/GangBeast-WebPort/main/TemplateData/favicon.ico">
+    <link rel="stylesheet" href="https://raw.githubusercontent.com/SchoolHacksRUs/GangBeast-WebPort/main/TemplateData/style.css">
     <style>
       html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
       #unity-container { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -14,6 +14,48 @@
       #unity-loading-bar { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
       #unity-progress-bar-empty { width: 200px; height: 12px; background: rgba(255,255,255,0.15); border: 1px solid #fff; border-radius: 3px; overflow: hidden; }
       #unity-progress-bar-full { height: 100%; width: 0%; background: #fff; transition: width 0.15s linear; }
+      #unity-mobile-warning { display: none; color: #fff; font-family: system-ui, sans-serif; text-align: center; padding: 20px; }
+
+      #log-panel {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        max-height: 45vh;
+        background: rgba(10, 10, 10, 0.94);
+        color: #d1d1d1;
+        font-family: monospace; font-size: 12px; line-height: 1.4;
+        border-top: 2px solid #e01b1b;
+        z-index: 9999;
+        display: flex; flex-direction: column;
+        box-shadow: 0 -4px 12px rgba(0,0,0,0.6);
+      }
+      #log-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 6px 10px; background: #2a1a1a;
+        font-weight: bold; user-select: none;
+      }
+      #log-header .title { color: #e01b1b; letter-spacing: 1px; }
+      #log-actions button {
+        background: #444; color: #d1d1d1; border: 1px solid #555;
+        padding: 2px 8px; margin-left: 4px;
+        font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px;
+      }
+      #log-actions button:hover { background: #555; }
+      #log-body {
+        flex: 1; overflow-y: auto; padding: 8px 10px;
+        white-space: pre-wrap; word-break: break-word;
+      }
+      #log-body .line { padding: 1px 0; }
+      #log-body .line.error { color: #ff6b6b; }
+      #log-body .line.warn  { color: #ffd166; }
+      #log-body .line.info  { color: #8fd3f4; }
+      #log-body .line.net   { color: #b4e197; }
+      #log-toggle {
+        position: fixed; bottom: 8px; right: 8px;
+        background: #e01b1b; color: #fff;
+        font-family: monospace; font-size: 12px; font-weight: bold;
+        border: none; padding: 6px 12px; border-radius: 4px;
+        cursor: pointer; z-index: 10000; display: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      }
     </style>
   </head>
   <body>
@@ -28,66 +70,207 @@
       <div id="unity-mobile-warning">WebGL builds are not supported on mobile devices.</div>
     </div>
 
+    <div id="log-panel">
+      <div id="log-header">
+        <span class="title">GANG BEASTS · DEBUG LOG</span>
+        <span id="log-actions">
+          <button id="log-clear">Clear</button>
+          <button id="log-copy">Copy</button>
+          <button id="log-hide">✕</button>
+        </span>
+      </div>
+      <div id="log-body"></div>
+    </div>
+    <button id="log-toggle">Show Log</button>
+
     <script>
-      var CDN       = "https://cdn.jsdelivr.net/gh/SchoolHacksRUs/GangBeast-WebPort@main/";
+      (function () {
+        var logBody, logPanel, logToggle;
+        var maxLines = 600;
+
+        function ready(fn) {
+          if (document.readyState !== 'loading') fn();
+          else document.addEventListener('DOMContentLoaded', fn);
+        }
+        ready(function () {
+          logBody = document.getElementById('log-body');
+          logPanel = document.getElementById('log-panel');
+          logToggle = document.getElementById('log-toggle');
+
+          document.getElementById('log-clear').addEventListener('click', function () { logBody.innerHTML = ''; });
+          document.getElementById('log-copy').addEventListener('click', function () {
+            var text = logBody.innerText;
+            if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () { __L('Log copied to clipboard.', 'info'); });
+            else {
+              var ta = document.createElement('textarea');
+              ta.value = text; document.body.appendChild(ta); ta.select();
+              try { document.execCommand('copy'); __L('Log copied.', 'info'); } catch (e) {}
+              document.body.removeChild(ta);
+            }
+          });
+          document.getElementById('log-hide').addEventListener('click', function () {
+            logPanel.style.display = 'none'; logToggle.style.display = 'block';
+          });
+          logToggle.addEventListener('click', function () {
+            logPanel.style.display = 'flex'; logToggle.style.display = 'none';
+          });
+
+          __L('Logger initialized.', 'info');
+          __L('location.href: ' + location.href, 'info');
+        });
+
+        function appendLine(text, cls) {
+          if (!logBody) return;
+          var div = document.createElement('div');
+          div.className = 'line' + (cls ? ' ' + cls : '');
+          div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+          logBody.appendChild(div);
+          while (logBody.children.length > maxLines) logBody.removeChild(logBody.firstChild);
+          logBody.scrollTop = logBody.scrollHeight;
+        }
+        window.__appendLog = appendLine;
+
+        function L(text, cls) { appendLine(text, cls); }
+        window.__L = L;
+
+        var orig = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+        console.log   = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), '');      orig.log.apply(console, arguments); };
+        console.warn  = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'warn');  orig.warn.apply(console, arguments); };
+        console.error = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'error'); orig.error.apply(console, arguments); };
+        console.info  = function () { appendLine(Array.prototype.map.call(arguments, fmt).join(' '), 'info');  orig.info.apply(console, arguments); };
+
+        function fmt(x) {
+          if (typeof x === 'string') return x;
+          if (x instanceof Error) return x.name + ': ' + x.message + (x.stack ? '\n' + x.stack : '');
+          try { return JSON.stringify(x); } catch (e) { return String(x); }
+        }
+
+        window.addEventListener('error', function (e) {
+          var msg = (e.message || 'unknown error');
+          if (e.filename) msg += ' (' + e.filename + ':' + e.lineno + ')';
+          appendLine('UNCAUGHT: ' + msg, 'error');
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          appendLine('UNHANDLED REJECTION: ' + fmt(e.reason), 'error');
+        });
+      })();
+    </script>
+
+    <script>
       var GITHUBRAW = "https://raw.githubusercontent.com/SchoolHacksRUs/GangBeast-WebPort/main/";
+      var buildUrl = GITHUBRAW + "Build";
 
-      window.__CDN_BASE = CDN;
-      window.__GITHUB_RAW = GITHUBRAW;
+      __L('GITHUBRAW = ' + GITHUBRAW, 'info');
 
-      // Fetch interceptor:
-      //  - rewrites relative Build/... and StreamingAssets/... to the CDN
-      //  - retries any failing CDN URL against raw GitHub (which has a
-      //    higher per-file size cap)
       var origFetch = window.fetch;
       window.fetch = function (input, init) {
         var url = typeof input === 'string' ? input : (input && input.url ? input.url : String(input));
-
+        var original = url;
         if (url && (url.indexOf('Build/') === 0 || url.indexOf('StreamingAssets/') === 0)) {
-          url = CDN + url;
+          url = GITHUBRAW + url;
         }
-
-        if (url.indexOf(CDN) === 0) {
-          var githubUrl = url.replace(CDN, GITHUBRAW);
-          return origFetch(url, init).then(function (res) {
-            if (res.ok) return res;
-            return origFetch(githubUrl, init);
-          }).catch(function () {
-            return origFetch(githubUrl, init);
-          });
+        if (url.indexOf('blob:') !== 0) {
+          __L('FETCH ' + url + (url !== original ? '  (from ' + original + ')' : ''), 'net');
         }
-
-        return origFetch(url, init);
+        if (input && input.url && url !== input.url) input = new Request(url, input);
+        else if (typeof input === 'string') input = url;
+        return origFetch.call(this, input, init).then(function (res) {
+          if (url.indexOf('blob:') !== 0) {
+            if (!res.ok) __L('  → HTTP ' + res.status + ' ' + res.statusText + '  ' + url, 'error');
+            else __L('  → ' + res.status + '  ' + (res.headers.get('Content-Length') || '?') + ' bytes', 'net');
+          }
+          return res;
+        }).catch(function (e) {
+          if (url.indexOf('blob:') !== 0) __L('  → NETWORK FAIL: ' + e.message + '  ' + url, 'error');
+          throw e;
+        });
       };
 
-      var gd = document.createElement("script");
-      gd.src = CDN + "game-data.js";
-      document.head.appendChild(gd);
+      (function () {
+        __L('Loading game-data.js…', 'info');
+        fetch(GITHUBRAW + "game-data.js")
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.text();
+          })
+          .then(function (text) {
+            __L('game-data.js fetched (' + text.length + ' bytes). Injecting…', 'info');
+            var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+            var s = document.createElement("script");
+            s.src = blobUrl;
+            s.onload = function () { __L('game-data.js executed.', 'info'); };
+            s.onerror = function () { __L('game-data.js failed to execute.', 'error'); };
+            document.head.appendChild(s);
+          })
+          .catch(function (e) { __L("game-data.js load failed: " + e.message, 'error'); });
+      })();
     </script>
 
     <script type="module">
-      import brotliPromise from "https://cdn.jsdelivr.net/npm/brotli-wasm@3.0.1/index.web.js?module";
-      window.brotliReady = brotliPromise;
+      // Load brotli-wasm via dynamic import so we control the URL and can
+      // inspect what shape the module resolves to.
+      // unpkg.com is the CDN the brotli-wasm README documents for browsers.
+      // The `?module` suffix tells unpkg to serve the ESM build.
+      // Dynamic-import failures are cached by the browser — hard-reload if
+      // you change this URL after a previous failure.
+      window.brotliReady = import("https://unpkg.com/brotli-wasm@3.0.0/index.web.js?module")
+        .then(function (mod) {
+          // Default export is typically a Promise resolving to the API object.
+          // If the namespace itself carries `decompress`, use that instead.
+          if (mod && typeof mod.decompress === "function") return mod;
+          if (mod && mod.default) return mod.default;
+          return mod;
+        })
+        .then(function (brotli) {
+          // If we got a Promise, await it so callers receive the API object.
+          if (brotli && typeof brotli.then === "function") return brotli;
+          return brotli;
+        })
+        .then(function (brotli) {
+          window.__L('brotli-wasm ready. typeof=' + (typeof brotli) +
+                     ' decompress=' + (typeof (brotli && brotli.decompress)), 'info');
+          return brotli;
+        })
+        .catch(function (e) {
+          window.__L('brotli-wasm import failed: ' + e.message, 'error');
+          throw e;
+        });
     </script>
 
     <script>
       async function fetchBrotliAsBlob(url, mimeType) {
+        __L('Fetching & decompressing ' + url.split('/').pop(), 'info');
         const res = await fetch(url);
         if (!res.ok) throw new Error("HTTP " + res.status + " for " + url);
         const compressed = new Uint8Array(await res.arrayBuffer());
+
         const brotli = await window.brotliReady;
+        if (!brotli || typeof brotli.decompress !== 'function') {
+          throw new Error('brotli-wasm did not expose decompress(). typeof=' +
+                          (typeof brotli) + ' keys=' + (brotli ? Object.keys(brotli).join(',') : 'none'));
+        }
+
         const decompressed = brotli.decompress(compressed);
+        __L('  ' + url.split('/').pop() + ': ' + compressed.byteLength + ' → ' + decompressed.byteLength + ' bytes', 'info');
         return URL.createObjectURL(new Blob([decompressed], { type: mimeType }));
       }
 
-      var buildUrl = CDN + "Build";
+      async function fetchAsJsBlob(url) {
+        __L('Fetching JS as blob: ' + url, 'info');
+        var r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        var text = await r.text();
+        __L('  ' + url.split('/').pop() + ': ' + text.length + ' bytes', 'info');
+        return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+      }
+
       var loaderUrl = buildUrl + "/WebGLValidation.loader.js";
 
       var config = {
         dataUrl: null,
         frameworkUrl: null,
         codeUrl: null,
-        streamingAssetsUrl: CDN + "StreamingAssets",
+        streamingAssetsUrl: GITHUBRAW + "StreamingAssets",
         companyName: "Boneloaf",
         productName: "Gang Beasts",
         productVersion: "1.0",
@@ -107,16 +290,23 @@
       }
 
       loadingBar.style.display = "block";
+      __L('Starting boot sequence…', 'info');
 
-      var script = document.createElement("script");
-      script.src = loaderUrl;
-      script.onload = async () => {
+      (async function boot() {
         var dataBlobUrl, frameworkBlobUrl, codeBlobUrl;
         try {
-          dataBlobUrl = await loadGameData("Build/data-manifest.json", (progress) => {
+          __L('Waiting for loadGameData to be defined…', 'info');
+          while (typeof window.loadGameData !== "function") {
+            await new Promise(function (r) { setTimeout(r, 50); });
+          }
+          __L('loadGameData ready.', 'info');
+
+          __L('Assembling data payload (game-data.js)…', 'info');
+          dataBlobUrl = await loadGameData("Build/data-manifest.json", function (progress) {
             progressBarFull.style.width = (40 * progress) + "%";
           });
           config.dataUrl = dataBlobUrl;
+          __L('Data payload ready.', 'info');
 
           frameworkBlobUrl = await fetchBrotliAsBlob(
             buildUrl + "/WebGLValidation.framework.js.br",
@@ -132,21 +322,38 @@
           config.codeUrl = codeBlobUrl;
           progressBarFull.style.width = "80%";
 
-          await createUnityInstance(canvas, config, (progress) => {
+          __L('Loading loader script…', 'info');
+          var loaderBlobUrl = await fetchAsJsBlob(loaderUrl);
+          await new Promise(function (resolve, reject) {
+            var script = document.createElement("script");
+            script.src = loaderBlobUrl;
+            script.onload = function () { __L('Loader executed.', 'info'); resolve(); };
+            script.onerror = function () { reject(new Error("Failed to execute loader")); };
+            document.head.appendChild(script);
+          });
+
+          __L('Calling createUnityInstance…', 'info');
+          var lastPctLogged = -1;
+          await createUnityInstance(canvas, config, function (progress) {
             progressBarFull.style.width = (80 + 20 * progress) + "%";
-          }).then((unityInstance) => {
+            var pct = Math.round(progress * 100);
+            if (pct >= lastPctLogged + 10) {
+              lastPctLogged = pct;
+              __L('Unity progress: ' + pct + '%', 'info');
+            }
+          }).then(function (unityInstance) {
+            __L('Unity instance created. Game running.', 'info');
             loadingBar.style.display = "none";
           });
         } catch (error) {
-          console.error('Boot failed: ' + (error && error.message ? error.message : error));
+          __L('Boot failed: ' + (error && error.message ? error.message : error), 'error');
           alert("No se pudo cargar el juego. Recarga para volver a intentarlo. " + error.message);
         } finally {
           if (dataBlobUrl) URL.revokeObjectURL(dataBlobUrl);
           if (frameworkBlobUrl) URL.revokeObjectURL(frameworkBlobUrl);
           if (codeBlobUrl) URL.revokeObjectURL(codeBlobUrl);
         }
-      };
-      document.body.appendChild(script);
+      })();
     </script>
   </body>
 </html>
