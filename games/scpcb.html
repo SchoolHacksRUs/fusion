@@ -26,12 +26,10 @@
 <div id="info-badge">SCP – Containment Breach · portable</div>
 <script>
   // -------------------------------------------------------------
-  //  Remote base. jsDelivr is fine here: the .data parts are
-  //  individual files small enough to fit under the 20 MB cap,
-  //  and .wasm/.js serve with correct MIME. No Brotli, so no
-  //  double-compression risk.
+  //  Raw GitHub base. jsDelivr rejects this repo (or its parts
+  //  exceed jsDelivr's size cap), so all assets come from raw GitHub.
   // -------------------------------------------------------------
-  const REPO_BASE = "https://cdn.jsdelivr.net/gh/larpinguser/q8j@main/";
+  const REPO_BASE = "https://raw.githubusercontent.com/larpinguser/q8j/main/";
 
   const canvas = document.getElementById('canvas');
   const loading = document.getElementById('loading');
@@ -69,6 +67,29 @@
   document.exitPointerLock = function(){
     try { if (epl) epl(); } catch (e) {}
   };
+
+  // Fetch interceptor: rewrite relative URLs (assets.data.000 etc.)
+  // to raw GitHub, and log every fetch.
+  const _origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    let url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+    if (url && url.indexOf('http') !== 0 && url.indexOf('blob:') !== 0 && url.indexOf('data:') !== 0) {
+      url = REPO_BASE + url.replace(/^\.?\/+/, "");
+    }
+    if (input && input.url && url !== input.url) input = new Request(url, input);
+    else if (typeof input === 'string') input = url;
+    return _origFetch.call(this, input, init);
+  };
+
+  // Load a JS file as a blob with the correct MIME type.
+  // Raw GitHub serves .js as text/plain, which blocks <script src>
+  // execution and blocks Unity from using it as a framework URL.
+  async function fetchAsJsBlob(url) {
+    const r = await _origFetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+    const text = await r.text();
+    return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+  }
 
   let maxPct = 0;
   var Module = {
@@ -234,11 +255,10 @@
 
     try {
       // -------------------------------------------------------------
-      //  Fetch the manifest from the CDN, then fetch each part by
-      //  prefixing it with REPO_BASE. The manifest's "parts" array
-      //  contains bare filenames (assets.data.000, ...).
+      //  Fetch the manifest from raw GitHub, then fetch each part by
+      //  prefixing it with REPO_BASE.
       // -------------------------------------------------------------
-      const mf = await fetch(REPO_BASE + 'assets.manifest.json', { cache: 'no-cache' });
+      const mf = await _origFetch(REPO_BASE + 'assets.manifest.json', { cache: 'no-cache' });
       if (mf.ok) {
         const manifest = await mf.json();
         const total = manifest.size;
@@ -246,7 +266,7 @@
         let offset = 0, loaded = 0;
         for (const part of manifest.parts) {
           const partUrl = part.startsWith('http') ? part : (REPO_BASE + part);
-          const r = await fetch(partUrl, { cache: 'no-cache' });
+          const r = await _origFetch(partUrl, { cache: 'no-cache' });
           if (!r.ok) throw new Error('chunk ' + partUrl + ' failed (' + r.status + ')');
           const chunk = new Uint8Array(await r.arrayBuffer());
           if (offset + chunk.length > total) {
@@ -267,15 +287,32 @@
     }
 
     // -------------------------------------------------------------
-    //  Load scpcb.js from the CDN. The script's own internal
-    //  fetch() of scpcb.wasm will resolve relative to its own URL
-    //  (jsDelivr), which is what we want.
+    //  Load scpcb.js as a blob so raw GitHub's text/plain MIME
+    //  doesn't block execution. The loader resolves scpcb.wasm
+    //  relative to its own URL — since it's a blob URL that won't
+    //  work, so we intercept the fetch for scpcb.wasm and serve it
+    //  from the raw GitHub URL directly.
     // -------------------------------------------------------------
-    const s = document.createElement('script');
-    s.async = true;
-    s.src = REPO_BASE + 'scpcb.js';
-    s.onerror = () => fail('Failed to load ' + REPO_BASE + 'scpcb.js');
-    document.body.appendChild(s);
+    try {
+      const wasmUrl = REPO_BASE + 'scpcb.wasm';
+      const _interceptFetch = window.fetch;
+      window.fetch = function (input, init) {
+        const u = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+        if (u && u.endsWith('scpcb.wasm')) {
+          return _interceptFetch.call(this, wasmUrl, init);
+        }
+        return _interceptFetch.call(this, input, init);
+      };
+
+      const jsBlobUrl = await fetchAsJsBlob(REPO_BASE + 'scpcb.js');
+      const s = document.createElement('script');
+      s.async = true;
+      s.src = jsBlobUrl;
+      s.onerror = () => fail('Failed to execute scpcb.js');
+      document.body.appendChild(s);
+    } catch (e) {
+      fail('Failed to load scpcb.js: ' + (e && e.message ? e.message : e));
+    }
   })();
 </script>
 </body>
