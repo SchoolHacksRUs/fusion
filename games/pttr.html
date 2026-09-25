@@ -40,7 +40,12 @@
   <body>
     <div id="gameContainer"></div>
     <script>
-      const baseUrl = "https://cdn.jsdelivr.net/gh/reeyuki/pttrwebport@main/";
+      // -------------------------------------------------------------
+      //  Raw GitHub base. jsDelivr rejects this repo or its parts
+      //  exceed jsDelivr's size cap, so all assets come from raw GitHub.
+      // -------------------------------------------------------------
+      const baseUrl = "https://raw.githubusercontent.com/reeyuki/pttrwebport/main/";
+
       const splits = { "Build/WebGL-Release.data.unityweb": 6 };
       let assetCache = {};
       let chunkGroups = {};
@@ -53,6 +58,27 @@
           allUrls.push({ key: k, idx: i, url: url });
         }
       }
+
+      // Fetch a JS file as text and wrap in a blob with the correct MIME.
+      // Raw GitHub serves .js as text/plain, which blocks <script src>.
+      function loadScriptAsBlob(url) {
+        return fetch(url)
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+            return r.text();
+          })
+          .then(function (text) {
+            var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+            return new Promise(function (resolve, reject) {
+              var s = document.createElement("script");
+              s.src = blobUrl;
+              s.onload = resolve;
+              s.onerror = function () { reject(new Error("Failed to execute " + url)); };
+              document.head.appendChild(s);
+            });
+          });
+      }
+
       Promise.all(
         allUrls.map((o) =>
           fetch(o.url)
@@ -79,6 +105,8 @@
             assetCache[k] = out;
             assetCache[k.split("/").pop()] = out;
           }
+
+          // Override fetch to serve merged payloads from memory.
           let origFetch = window.fetch;
           window.fetch = function (input, init) {
             let url =
@@ -99,6 +127,8 @@
             }
             return origFetch.apply(this, arguments);
           };
+
+          // XHR override for the legacy UnityLoader which uses XHR.
           let origOpen = XMLHttpRequest.prototype.open;
           let origSend = XMLHttpRequest.prototype.send;
           XMLHttpRequest.prototype.open = function (m, u) {
@@ -159,18 +189,40 @@
             }
             return origSend.apply(this, arguments);
           };
-          let s = document.createElement("script");
-          s.src = baseUrl + "Build/UnityLoader.js";
-          s.onload = () => {
-            window.gameInstance = UnityLoader.instantiate(
-              "gameContainer",
-              baseUrl + "Build/WebGL-Release.json",
-              {},
-            );
-          };
-          document.body.appendChild(s);
+
+          // Load UnityLoader.js and the JSON manifest from raw GitHub.
+          // Both are wrapped as blobs to bypass raw GitHub's text/plain
+          // MIME, which would otherwise block the loader script.
+          loadScriptAsBlob(baseUrl + "Build/UnityLoader.js").then(function () {
+            // The JSON manifest references payload URLs relative to its own
+            // location. Fetch it as text, rewrite the payload names to
+            // absolute raw GitHub URLs, wrap as a blob with application/json,
+            // and hand that to UnityLoader.instantiate.
+            return fetch(baseUrl + "Build/WebGL-Release.json")
+              .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status + " for WebGL-Release.json");
+                return r.json();
+              })
+              .then(function (json) {
+                // Rewrite every URL-ish field to absolute raw GitHub paths.
+                var keys = ["dataUrl", "wasmCodeUrl", "wasmFrameworkUrl", "asmCodeUrl", "asmFrameworkUrl", "asmMemoryUrl"];
+                for (var i = 0; i < keys.length; i++) {
+                  var k = keys[i];
+                  if (!json[k]) continue;
+                  if (json[k].indexOf("http") !== 0) {
+                    json[k] = baseUrl + "Build/" + json[k].replace(/^.*\//, "");
+                  }
+                }
+                var blobUrl = URL.createObjectURL(new Blob([JSON.stringify(json)], { type: "application/json" }));
+                window.gameInstance = UnityLoader.instantiate("gameContainer", blobUrl, {});
+              });
+          }).catch(function (err) {
+            document.getElementById("gameContainer").textContent = "Load failed: " + err.message;
+          });
         })
-        .catch(() => {});
+        .catch(function (err) {
+          document.getElementById("gameContainer").textContent = "Load failed: " + err.message;
+        });
     </script>
   </body>
 </html>
