@@ -4,17 +4,151 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>SUPERFLIGHT</title>
-    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/squidward5/superflight-webport@main/TemplateData/favicon.ico">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/squidward5/superflight-webport@main/TemplateData/style.css">
-    <script src="https://cdn.jsdelivr.net/gh/squidward5/superflight-webport@main/TemplateData/UnityProgress.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/squidward5/superflight-webport@main/Build/UnityLoader.js"></script>
-    <script>
-      var gameInstance = UnityLoader.instantiate("gameContainer", "https://cdn.jsdelivr.net/gh/squidward5/superflight-webport@main/Build/superflight.json", {onProgress: UnityProgress});
-    </script>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+      .webgl-content { position: absolute; inset: 0; }
+      #gameContainer { width: 100%; height: 100%; }
+      #gameContainer canvas { width: 100% !important; height: 100% !important; display: block; }
+      #loading {
+        position: absolute; left: 50%; top: 50%;
+        transform: translate(-50%, -50%);
+        color: #fff; font-family: monospace; font-size: 14px;
+        text-align: center; max-width: 80%; white-space: pre-wrap; z-index: 5;
+      }
+    </style>
   </head>
   <body>
-    <div class="webgl-content">
-      <div id="gameContainer"></div>
-    </div>
+    <div class="webgl-content"><div id="gameContainer"></div></div>
+    <div id="loading">Loading…</div>
+
+    <script>
+      var REMOTE_BASE = "https://raw.githubusercontent.com/squidward5/superflight-webport/main/";
+
+      var loadingEl = document.getElementById("loading");
+      function setLoading(msg) { loadingEl.textContent = msg; }
+
+      function loadScriptAsBlob(url) {
+        return new Promise(function (resolve, reject) {
+          fetch(url)
+            .then(function (r) {
+              if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+              return r.text();
+            })
+            .then(function (text) {
+              var blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+              var s = document.createElement("script");
+              s.src = blobUrl;
+              s.onload = resolve;
+              s.onerror = function () { reject(new Error("Failed to execute " + url)); };
+              document.head.appendChild(s);
+            })
+            .catch(reject);
+        });
+      }
+
+      // Fetch a binary file and wrap it in a blob URL with an explicit MIME
+      // type so UnityLoader knows how to handle each payload.
+      async function fetchAsTypedBlobUrl(url, mimeType) {
+        var r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        var buf = await r.arrayBuffer();
+        return URL.createObjectURL(new Blob([buf], { type: mimeType }));
+      }
+
+      function resolveConflicts(text, side) {
+        var lines = text.split(/\r?\n/);
+        var out = [];
+        var state = "normal";
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          if (line.indexOf("<<<<<<<") === 0) { state = "ours"; continue; }
+          if (line.indexOf("=======") === 0 && state === "ours") { state = "theirs"; continue; }
+          if (line.indexOf(">>>>>>>") === 0 && (state === "ours" || state === "theirs")) { state = "normal"; continue; }
+          if (state === "normal") out.push(line);
+          else if (state === "ours" && side === "ours") out.push(line);
+          else if (state === "theirs" && side === "theirs") out.push(line);
+        }
+        return out.join("\n");
+      }
+
+      function parseManifest(text) {
+        var t = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+        try { return JSON.parse(t); } catch (e) {}
+        var first = t.indexOf("{");
+        var last = t.lastIndexOf("}");
+        if (first === -1 || last <= first) throw new Error("No object literal found.");
+        var obj = t.slice(first, last + 1).replace(/,(\s*[}\]])/g, "$1");
+        try { return JSON.parse(obj); } catch (e) {}
+        obj = obj.replace(/'/g, '"')
+                 .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)(\s*:)/g, '$1"$2"$3')
+                 .replace(/,(\s*[}\]])/g, "$1");
+        try { return JSON.parse(obj); } catch (e) {
+          throw new Error("Could not parse manifest. Snippet: " + obj.slice(0, 120));
+        }
+      }
+
+      async function bootWithSide(side) {
+        setLoading("Loading engine scripts…");
+        await loadScriptAsBlob(REMOTE_BASE + "TemplateData/UnityProgress.js");
+        await loadScriptAsBlob(REMOTE_BASE + "Build/UnityLoader.js");
+
+        setLoading("Loading manifest…");
+        var jsonRes = await fetch(REMOTE_BASE + "Build/superflight.json");
+        if (!jsonRes.ok) throw new Error("HTTP " + jsonRes.status + " for superflight.json");
+        var rawText = await jsonRes.text();
+
+        var resolved = resolveConflicts(rawText, side);
+        var buildJson = parseManifest(resolved);
+
+        setLoading("Downloading game files…");
+
+        var mimeMap = {
+          dataUrl:          "application/octet-stream",
+          wasmCodeUrl:      "application/wasm",
+          wasmFrameworkUrl: "application/javascript",
+          asmCodeUrl:       "application/javascript",
+          asmFrameworkUrl:  "application/javascript",
+          asmMemoryUrl:     "application/octet-stream"
+        };
+
+        var keys = Object.keys(mimeMap);
+        for (var i = 0; i < keys.length; i++) {
+          var k = keys[i];
+          if (!buildJson[k]) continue;
+          var filename = buildJson[k].replace(/^.*\//, "");
+          var absUrl = REMOTE_BASE + "Build/" + filename;
+          buildJson[k] = await fetchAsTypedBlobUrl(absUrl, mimeMap[k]);
+        }
+
+        var patchedJsonBlob = new Blob([JSON.stringify(buildJson)], { type: "application/json" });
+        var patchedJsonUrl = URL.createObjectURL(patchedJsonBlob);
+
+        setLoading("Starting engine (" + side + " side)…");
+        UnityLoader.instantiate("gameContainer", patchedJsonUrl, { onProgress: UnityProgress });
+
+        setTimeout(function () {
+          if (loadingEl.parentNode) loadingEl.remove();
+        }, 1500);
+
+        var container = document.getElementById("gameContainer");
+        container.setAttribute("tabindex", "-1");
+        container.addEventListener("click", function () { container.focus(); });
+      }
+
+      (async function () {
+        try {
+          await bootWithSide("ours");
+        } catch (err) {
+          console.error("[ours] failed:", err);
+          try {
+            setLoading("Retrying with other conflict side…");
+            await bootWithSide("theirs");
+          } catch (err2) {
+            console.error("[theirs] failed:", err2);
+            setLoading("Load failed: " + (err2 && err2.message ? err2.message : err2));
+          }
+        }
+      })();
+    </script>
   </body>
 </html>
