@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>PEAK</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+      #wrap { display: flex; flex-direction: column; align-items: center;
+              justify-content: center; height: 100%; background: #000; }
+      #unity-canvas { background: #000; max-width: 100%; max-height: 100%;
+                      outline: none; display: block; }
+      #bar { width: 320px; height: 12px; margin-top: 14px; border: 1px solid #555;
+             display: none; }
+      #barfill { width: 0%; height: 100%; background: #7cc242; transition: width 0.15s linear; }
+      #msg { color: #bbb; font: 13px/1.5 system-ui, sans-serif; margin-top: 10px;
+             text-align: center; }
+      #credit { position: fixed; right: 10px; bottom: 8px; z-index: 10;
+                color: #8a8a8a; font: 12px/1.4 system-ui, sans-serif;
+                text-align: right; pointer-events: auto; }
+      #credit a { color: #7cc242; text-decoration: none; }
+      #credit a:hover { text-decoration: underline; }
+      #fs { position: fixed; left: 10px; bottom: 8px; z-index: 10; display: none;
+            background: rgba(255,255,255,0.08); color: #ddd; border: 1px solid #555;
+            border-radius: 4px; padding: 6px 12px; cursor: pointer;
+            font: 12px/1 system-ui, sans-serif; }
+      #fs:hover { background: rgba(255,255,255,0.18); }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <canvas id="unity-canvas" width="960" height="600" tabindex="-1"></canvas>
+      <div id="bar"><div id="barfill"></div></div>
+      <div id="msg">Loading…</div>
+    </div>
+    <button id="fs" type="button">Fullscreen</button>
+    <div id="credit">
+      ported by @._.dasher._.<br>
+      <a href="https://wasm.rip/" target="_blank" rel="noopener">wasm.rip</a>
+    </div>
+    <script>
+      // Manifest written by make_cdn_bundle.py.
+      var MANIFEST = {
+        "data": {
+          "file": "WebGL.data.unityweb",
+          "parts": [
+            "WebGL.data.unityweb.part000",
+            "WebGL.data.unityweb.part001",
+            "WebGL.data.unityweb.part002",
+            "WebGL.data.unityweb.part003",
+            "WebGL.data.unityweb.part004",
+            "WebGL.data.unityweb.part005",
+            "WebGL.data.unityweb.part006",
+            "WebGL.data.unityweb.part007",
+            "WebGL.data.unityweb.part008",
+            "WebGL.data.unityweb.part009",
+            "WebGL.data.unityweb.part010",
+            "WebGL.data.unityweb.part011",
+            "WebGL.data.unityweb.part012"
+          ],
+          "bytes": 241608952
+        },
+        "code": {
+          "file": "WebGL.wasm.unityweb",
+          "bytes": 12657365
+        },
+        "framework": {
+          "file": "WebGL.framework.js.unityweb",
+          "bytes": 85982
+        },
+        "loader": {
+          "file": "WebGL.loader.js",
+          "bytes": 117365
+        }
+      };
+
+      // -------------------------------------------------------------
+      //  Raw GitHub base. jsDelivr rejects this repo, so all assets
+      //  come from raw GitHub. BUILD is prefixed to every part path.
+      // -------------------------------------------------------------
+      var REMOTE_BASE = "https://raw.githubusercontent.com/wasmdotrip/Peak-Port/main/";
+      var BUILD = REMOTE_BASE + "Build";
+
+      // -------------------------------------------------------------
+      //  The C# level streamer resolves bundle URLs against
+      //  Application.absoluteURL, ignoring <base>. Stamp the CDN root
+      //  onto the page's own URL so those lookups hit raw GitHub too.
+      // -------------------------------------------------------------
+      var CDN_BASE = REMOTE_BASE.replace(/\/$/, "");
+      try {
+        var u = new URL(window.location.href);
+        if (u.searchParams.get("cdn") !== CDN_BASE) {
+          u.searchParams.set("cdn", CDN_BASE);
+          history.replaceState(null, "", u.toString());
+        }
+      } catch (e) {}
+
+      var canvas  = document.querySelector("#unity-canvas");
+      var bar     = document.querySelector("#bar");
+      var barfill = document.querySelector("#barfill");
+      var msg     = document.querySelector("#msg");
+
+      function setMsg(t) { msg.textContent = t; }
+      function mb(bytes) { return (bytes / 1048576).toFixed(1); }
+
+      var TOTAL = MANIFEST.data.bytes + MANIFEST.framework.bytes + MANIFEST.code.bytes;
+      var downloaded = 0;
+
+      function report(label) {
+        bar.style.display = "block";
+        var pct = TOTAL ? downloaded / TOTAL : 0;
+        barfill.style.width = (pct * 100).toFixed(1) + "%";
+        setMsg("Downloading " + label + "… " + mb(downloaded) + " / " + mb(TOTAL) +
+               " MB (" + Math.floor(pct * 100) + "%)");
+      }
+
+      // Merge parts into a Blob with an explicit MIME type. The MIME hint
+      // is critical: without it, WebAssembly.instantiateStreaming rejects
+      // the blob and Unity's loader stalls silently.
+      async function assemble(entry, label, mimeType) {
+        var urls = entry.parts || [entry.file];
+        var buffers = [];
+        for (var i = 0; i < urls.length; i++) {
+          var url = BUILD + "/" + urls[i];
+          var res = await fetch(url);
+          if (!res.ok) throw new Error("failed to fetch " + url + " (" + res.status + ")");
+          if (res.body && res.body.getReader) {
+            var reader = res.body.getReader();
+            while (true) {
+              var step = await reader.read();
+              if (step.done) break;
+              buffers.push(step.value);
+              downloaded += step.value.byteLength;
+              report(label);
+            }
+          } else {
+            var buf = await res.arrayBuffer();
+            buffers.push(buf);
+            downloaded += buf.byteLength;
+            report(label);
+          }
+        }
+        return URL.createObjectURL(new Blob(buffers, { type: mimeType }));
+      }
+
+      // Fetch a JS file as text and wrap it in a blob with correct MIME.
+      // Raw GitHub serves .js as text/plain, which blocks <script src>.
+      async function fetchAsJsBlob(url) {
+        var r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+        var text = await r.text();
+        return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+      }
+
+      (async function () {
+        try {
+          var dataUrl      = await assemble(MANIFEST.data, "game data", "application/octet-stream");
+          var frameworkUrl = await assemble(MANIFEST.framework, "framework", "application/javascript");
+          var codeUrl      = await assemble(MANIFEST.code, "code", "application/wasm");
+
+          setMsg("Loading loader…");
+          var loaderBlobUrl = await fetchAsJsBlob(BUILD + "/" + MANIFEST.loader.file);
+
+          setMsg("Starting…");
+          await new Promise(function (resolve, reject) {
+            var script = document.createElement("script");
+            script.src = loaderBlobUrl;
+            script.onload = resolve;
+            script.onerror = function () { reject(new Error("Failed to execute loader")); };
+            document.head.appendChild(script);
+          });
+
+          createUnityInstance(canvas, {
+            dataUrl: dataUrl,
+            frameworkUrl: frameworkUrl,
+            codeUrl: codeUrl,
+            streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
+            companyName: "Aggro Crab & Landfall",
+            productName: "PEAK",
+            productVersion: "1.62.a",
+          }, function (p) {
+            bar.style.display = "block";
+            barfill.style.width = Math.round(p * 100) + "%";
+            setMsg("Loading… " + Math.round(p * 100) + "%");
+          }).then(function (instance) {
+            window.unityInstance = instance;
+            bar.style.display = "none";
+            setMsg("");
+            var fs = document.querySelector("#fs");
+            fs.style.display = "block";
+            fs.onclick = function () {
+              if (instance.SetFullscreen) instance.SetFullscreen(1);
+              else if (canvas.requestFullscreen) canvas.requestFullscreen();
+              canvas.focus();
+            };
+          }).catch(function (e) {
+            console.error(e);
+            setMsg("Failed to start: " + e);
+          });
+        } catch (e) {
+          console.error(e);
+          setMsg(String(e));
+        }
+      })();
+    </script>
+  </body>
+</html>
