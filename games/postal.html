@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="en-us">
   <head>
-  <base href="https://cdn.jsdelivr.net/gh/Stinkalistic/UGS@main/MISC/postal/">
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>POSTAL: Play FREE on the web</title>
@@ -27,17 +26,36 @@
     <figure style="overflow:visible;" id="spinner"></figure>
     <div class="emscripten" id="status">Downloading game files...</div>
     <div class="emscripten">
-      <progress value="0" max="100" id="progress" hidden=1></progress>  
+      <progress value="0" max="100" id="progress" hidden=1></progress>
     </div>
     <div class="emscripten_border">
       <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1 onclick="requestPointerLock()"></canvas>
     </div>
 
     <script>
+      // -------------------------------------------------------------
+      //  Raw GitHub base. jsDelivr rejects this repo or its parts
+      //  exceed jsDelivr's size cap, so all assets come from raw GitHub.
+      // -------------------------------------------------------------
+      var REMOTE_BASE = "https://raw.githubusercontent.com/Stinkalistic/UGS/main/MISC/postal/";
+
       const statusElement = document.getElementById('status');
       const progressElement = document.getElementById('progress');
       const spinnerElement = document.getElementById('spinner');
       const canvasElement = document.getElementById('canvas');
+
+      // Rewrite any relative URL to the raw GitHub base so any internal
+      // fetch inside index.js resolves correctly.
+      const _origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        let url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+        if (url && url.indexOf(REMOTE_BASE) !== 0 && url.indexOf('blob:') !== 0 && url.indexOf('data:') !== 0 && url.indexOf('http') !== 0) {
+          url = REMOTE_BASE + url.replace(/^\.?\/+/, "");
+        }
+        if (input && input.url && url !== input.url) input = new Request(url, input);
+        else if (typeof input === "string") input = url;
+        return _origFetch.call(this, input, init);
+      };
 
       function mergeFiles(fileParts, cb) {
         return new Promise((resolve, reject) => {
@@ -50,7 +68,7 @@
             }
             fetch(fileParts[index])
               .then((response) => {
-                if (!response.ok) throw new Error("Failed to load " + fileParts[index]);
+                if (!response.ok) throw new Error("Failed to load " + fileParts[index] + " (HTTP " + response.status + ")");
                 return response.arrayBuffer();
               })
               .then((data) => {
@@ -67,7 +85,7 @@
       function getParts(baseName, total) {
         let parts = [];
         for (let i = 1; i <= total; i++) {
-          parts.push(`${baseName}.part${i}`);
+          parts.push(REMOTE_BASE + baseName + ".part" + i);
         }
         return parts;
       }
@@ -80,9 +98,7 @@
           statusElement.innerHTML = `Merging data parts (${loaded}/${parts.length})...`;
         });
 
-        const mergedFile = new File([blob], "index.data");
-        const url = URL.createObjectURL(mergedFile);
-        return url;
+        return URL.createObjectURL(blob);
       }
 
       var Module = {
@@ -101,22 +117,31 @@
       (async () => {
         try {
           const dataUrl = await prepareDataFile();
-          console.log("Merged index.data ready:", dataUrl);
 
-          const origFetch = window.fetch;
+          const _origFetch2 = window.fetch;
           window.fetch = (input, init) => {
             if (typeof input === "string" && input.endsWith("index.data")) {
-              return origFetch(dataUrl, init);
+              return _origFetch2(dataUrl, init);
             }
-            return origFetch(input, init);
+            return _origFetch2(input, init);
           };
 
+          // Load index.js as a blob so raw GitHub's text/plain MIME
+          // doesn't block execution as <script src>.
+          const jsRes = await fetch(REMOTE_BASE + "index.js");
+          if (!jsRes.ok) throw new Error("Failed to load index.js (HTTP " + jsRes.status + ")");
+          const jsText = await jsRes.text();
+          const jsBlobUrl = URL.createObjectURL(new Blob([jsText], { type: "application/javascript" }));
+
           const script = document.createElement("script");
-          script.src = "index.js";
+          script.src = jsBlobUrl;
+          script.onerror = function () {
+            statusElement.textContent = "Error loading index.js";
+          };
           document.body.appendChild(script);
         } catch (err) {
           console.error(err);
-          statusElement.textContent = "Error merging data files.";
+          statusElement.textContent = "Error merging data files: " + (err && err.message ? err.message : err);
         }
       })();
     </script>
