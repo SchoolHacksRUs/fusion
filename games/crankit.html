@@ -117,9 +117,6 @@ body {
 
 		<script>
 		(function () {
-			// ============================================================
-			// Global path constants
-			// ============================================================
 			var REMOTE_BASE = 'https://raw.githubusercontent.com/Stinkalistic/SWAGgames/main/crankit/';
 			var ABS = /^(https?:|blob:|data:|\/\/|about:)/i;
 
@@ -130,9 +127,6 @@ body {
 			}
 			window.__rewrite = rewrite;
 
-			// ============================================================
-			// Patch WebAssembly.instantiateStreaming
-			// ============================================================
 			if (window.WebAssembly && window.WebAssembly.instantiateStreaming) {
 				var origInstantiateStreaming = window.WebAssembly.instantiateStreaming.bind(window.WebAssembly);
 				window.WebAssembly.instantiateStreaming = function (source, imports) {
@@ -143,9 +137,6 @@ body {
 				};
 			}
 
-			// ============================================================
-			// Patch HTMLScriptElement.prototype.src setter
-			// ============================================================
 			try {
 				var srcDesc = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
 				if (srcDesc && srcDesc.set) {
@@ -158,9 +149,6 @@ body {
 				}
 			} catch (e) { /* not fatal */ }
 
-			// ============================================================
-			// Pre-seed Module.locateFile
-			// ============================================================
 			window.Module = window.Module || {};
 			window.Module.locateFile = function (path, prefix) {
 				if (ABS.test(path)) return path;
@@ -221,7 +209,6 @@ body {
 				return combined;
 			}
 
-			// ---- fetch interception ----
 			window.fetch = function (input, init) {
 				var url = typeof input === 'string' ? input : (input && input.url ? input.url : String(input));
 				var name = virtualName(url);
@@ -241,9 +228,6 @@ body {
 				return ORIG_FETCH(input, init);
 			};
 
-			// ---- XHR interception ----
-			// Godot/Emscripten uses XHR for loading the PCK and WASM in
-			// many builds, so we need to short-circuit those too.
 			function ChunkedXHR() {
 				var xhr = new ORIG_XHR();
 				var _open = xhr.open;
@@ -303,7 +287,6 @@ body {
 
 				return xhr;
 			}
-			// Copy static constants (UNSENT, OPENED, etc.) onto the wrapper.
 			for (var k in ORIG_XHR) {
 				if (Object.prototype.hasOwnProperty.call(ORIG_XHR, k)) {
 					ChunkedXHR[k] = ORIG_XHR[k];
@@ -318,11 +301,6 @@ body {
 		(function () {
 			var REMOTE_BASE = 'https://raw.githubusercontent.com/Stinkalistic/SWAGgames/main/crankit/';
 
-			// ============================================================
-			// Script loader: fetch main2.js and index.js as text, inject
-			// as blob URLs so sandboxed editors that strip cross-origin
-			// <script src> tags still accept them.
-			// ============================================================
 			function injectScript(name) {
 				return new Promise(function (resolve, reject) {
 					fetch(name)
@@ -342,14 +320,11 @@ body {
 				});
 			}
 
-			// ============================================================
-			// Boot sequence: load main2.js, then index.js, then run Godot.
-			// ============================================================
 			injectScript('main2.js')
 				.then(function () { return injectScript('index.js'); })
 				.then(function () {
 					window.godotRunStart = function() {
-						const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":124754088,"index.wasm":36160334},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+						const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":false,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":124754088,"index.wasm":36160334},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 						const GODOT_THREADS_ENABLED = false;
 						const engine = new Engine(GODOT_CONFIG);
 
@@ -405,32 +380,8 @@ body {
 							});
 
 							if (missing.length !== 0) {
-								if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-									let serviceWorkerRegistrationPromise;
-									try {
-										serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-									} catch (err) {
-										serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-									}
-									Promise.race([
-										serviceWorkerRegistrationPromise.then((registration) => {
-											if (registration != null) {
-												return Promise.reject(new Error('Service worker already exists.'));
-											}
-											return registration;
-										}).then(() => engine.installServiceWorker()),
-										new Promise((resolve) => {
-											setTimeout(() => resolve(), 2000);
-										}),
-									]).then(() => {
-										window.location.reload();
-									}).catch((err) => {
-										console.error('Error while registering service worker:', err);
-									});
-								} else {
-									const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-									displayFailureNotice(missingMsg + missing.join('\n'));
-								}
+								const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
+								displayFailureNotice(missingMsg + missing.join('\n'));
 							} else {
 								setStatusMode('progress');
 								engine.startGame({
