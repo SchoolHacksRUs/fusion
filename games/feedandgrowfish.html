@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>Feed & Grow: Fish</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden;
+        background: #0d0f12; color: #fff;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      #unity-canvas {
+        position: fixed; inset: 0; display: block;
+        width: 100vw; height: 100vh;
+        border: 0; outline: none; background: #000;
+        touch-action: none;
+      }
+      #loading-screen {
+        position: fixed; inset: 0; z-index: 10;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column;
+        background: #0d0f12; transition: opacity .35s ease;
+      }
+      #loading-screen.hidden { opacity: 0; pointer-events: none; }
+      #game-title {
+        margin-bottom: 22px;
+        font-size: clamp(18px, 3vw, 24px);
+        font-weight: 700; letter-spacing: 2px; text-align: center;
+      }
+      #progress-container {
+        width: min(380px, 80vw); height: 8px;
+        background: #252525; border-radius: 4px;
+        overflow: hidden; margin-bottom: 15px;
+      }
+      #progress-bar {
+        width: 0%; height: 100%;
+        background: #f2a541; transition: width .15s linear;
+      }
+      #loading-status {
+        width: min(380px, 80vw); min-height: 18px;
+        color: #aaa; font-size: 12px; letter-spacing: 1px;
+        text-align: center; overflow-wrap: anywhere;
+      }
+      #loading-percent {
+        margin-top: 9px; color: #666; font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+      #loading-error {
+        display: none; width: min(500px, 85vw);
+        margin-top: 20px; color: #ff6666; font-size: 12px;
+        line-height: 1.6; text-align: center; overflow-wrap: anywhere;
+      }
+      #fullscreen-btn {
+        position: fixed; right: 12px; bottom: 12px;
+        padding: 8px 12px; border: 0; border-radius: 6px;
+        background: rgba(0,0,0,0.65); color: #fff;
+        font-size: 13px; cursor: pointer; z-index: 5; display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+
+    <div id="loading-screen">
+      <div id="game-title">Feed & Grow: Fish</div>
+      <div id="progress-container"><div id="progress-bar"></div></div>
+      <div id="loading-status">INITIALIZING...</div>
+      <div id="loading-percent">0%</div>
+      <div id="loading-error"></div>
+    </div>
+
+    <button id="fullscreen-btn" title="Toggle Fullscreen">⛶ Fullscreen</button>
+
+    <script>
+      (() => {
+        const canvas = document.querySelector("#unity-canvas");
+        const loadingScreen = document.querySelector("#loading-screen");
+        const progressBar = document.querySelector("#progress-bar");
+        const statusText = document.querySelector("#loading-status");
+        const percentText = document.querySelector("#loading-percent");
+        const errorText = document.querySelector("#loading-error");
+        const fullscreenBtn = document.querySelector("#fullscreen-btn");
+
+        const RAW_BASE = "https://raw.githubusercontent.com/AlexBoops/Feed-and-Grow-Port/main";
+        const BUILD_BASE = `${RAW_BASE}/Build`;
+        const DATA_PARTS = 28;
+
+        function setLoading(percent, message) {
+          const value = Math.max(0, Math.min(100, percent));
+          progressBar.style.width = value + "%";
+          percentText.textContent = Math.round(value) + "%";
+          statusText.textContent = message;
+        }
+
+        function showError(error) {
+          console.error("[Unity] Failed to load:", error);
+          statusText.textContent = "LOADING FAILED";
+          errorText.style.display = "block";
+          errorText.textContent = (error && error.message ? error.message : String(error));
+        }
+
+        function resizeCanvas() {
+          canvas.style.width = window.innerWidth + "px";
+          canvas.style.height = window.innerHeight + "px";
+        }
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+
+        async function fetchWithRetry(url, retries = 5, delayMs = 4000) {
+          for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+              const res = await fetch(url, { cache: "no-store" });
+              const ct = res.headers.get("content-type") || "";
+              if (res.ok && !ct.includes("text/html")) {
+                const buf = await res.arrayBuffer();
+                if (buf.byteLength > 0) return buf;
+              }
+            } catch (err) {}
+            if (attempt < retries) {
+              setLoading(parseFloat(progressBar.style.width) || 0,
+                `RETRYING IN ${delayMs/1000}s (ATTEMPT ${attempt}/${retries})...`);
+              await new Promise(r => setTimeout(r, delayMs));
+            }
+          }
+          throw new Error(`Failed to download ${url} after ${retries} attempts.`);
+        }
+
+        async function fetchJsAsBlobUrl(url) {
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+
+          const buf = await res.arrayBuffer();
+          let uint8 = new Uint8Array(buf);
+
+          if (uint8.length >= 2 && uint8[0] === 0x1f && uint8[1] === 0x8b) {
+            const ds = new DecompressionStream("gzip");
+            const writer = ds.writable.getWriter();
+            writer.write(uint8);
+            writer.close();
+            const out = await new Response(ds.readable).arrayBuffer();
+            uint8 = new Uint8Array(out);
+          }
+
+          const text = new TextDecoder().decode(uint8);
+          return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+        }
+
+        async function decompressIfGzip(uint8) {
+          if (uint8.length >= 2 && uint8[0] === 0x1f && uint8[1] === 0x8b) {
+            const ds = new DecompressionStream("gzip");
+            const writer = ds.writable.getWriter();
+            writer.write(uint8);
+            writer.close();
+            const out = await new Response(ds.readable).arrayBuffer();
+            return new Uint8Array(out);
+          }
+          return uint8;
+        }
+
+        async function assembleDataFile(startPct, endPct) {
+          const chunks = [];
+          let totalBytes = 0;
+          for (let i = 1; i <= DATA_PARTS; i++) {
+            const part = String(i).padStart(4, "0");
+            const url = `${BUILD_BASE}/FeedAndGrow-Port.data.unityweb.part${part}`;
+            const pct = startPct + ((i - 1) / DATA_PARTS) * (endPct - startPct);
+            setLoading(pct, `DOWNLOADING DATA (${i}/${DATA_PARTS})...`);
+            const buf = await fetchWithRetry(url);
+            chunks.push(buf);
+            totalBytes += buf.byteLength;
+          }
+
+          const combined = new Uint8Array(totalBytes);
+          let offset = 0;
+          for (const c of chunks) {
+            combined.set(new Uint8Array(c), offset);
+            offset += c.byteLength;
+          }
+
+          setLoading(endPct, "DECOMPRESSING DATA...");
+          const finalData = await decompressIfGzip(combined);
+
+          const file = new File([finalData], "FeedAndGrow-Port.data.unityweb", {
+            type: "application/octet-stream"
+          });
+          return URL.createObjectURL(file);
+        }
+
+        async function loadGame() {
+          try {
+            setLoading(1, "INITIALIZING...");
+
+            const dataUrl = await assembleDataFile(2, 70);
+            setLoading(71, "LOADING FRAMEWORK...");
+
+            const frameworkBlobUrl = await fetchJsAsBlobUrl(
+              `${BUILD_BASE}/FeedAndGrow-Port.framework.js.unityweb`
+            );
+
+            const wasmUrl = `${BUILD_BASE}/FeedAndGrow-Port.wasm.unityweb`;
+
+            setLoading(82, "LOADING ENGINE LOADER...");
+            const loaderBlobUrl = await fetchJsAsBlobUrl(
+              `${BUILD_BASE}/FeedAndGrow-Port.loader.js`
+            );
+
+            await new Promise((resolve, reject) => {
+              const script = document.createElement("script");
+              script.src = loaderBlobUrl;
+              script.onload = resolve;
+              script.onerror = () => reject(new Error("Failed to execute Unity loader blob."));
+              document.head.appendChild(script);
+            });
+
+            const config = {
+              dataUrl: dataUrl,
+              frameworkUrl: frameworkBlobUrl,
+              codeUrl: wasmUrl,
+              streamingAssetsUrl: `${RAW_BASE}/StreamingAssets`,
+              companyName: "OldBlood Productions",
+              productName: "Feed & Grow: Fish",
+              productVersion: "1.0",
+              matchWebGLToCanvasSize: true,
+              devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2)
+            };
+
+            const unityInstance = await createUnityInstance(canvas, config, progress => {
+              setLoading(82 + progress * 18,
+                progress < 1
+                  ? `LAUNCHING ENGINE... ${Math.round(progress * 100)}%`
+                  : "STARTING GAME...");
+            });
+
+            window.unityInstance = unityInstance;
+            setLoading(100, "READY");
+
+            setTimeout(() => {
+              loadingScreen.classList.add("hidden");
+              setTimeout(() => {
+                loadingScreen.style.display = "none";
+                fullscreenBtn.style.display = "block";
+                canvas.focus();
+              }, 400);
+            }, 250);
+
+            fullscreenBtn.onclick = () => unityInstance.SetFullscreen(1);
+          } catch (err) {
+            showError(err);
+          }
+        }
+
+        window.addEventListener("keydown", e => {
+          if ([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.key)) e.preventDefault();
+        }, { passive: false });
+
+        canvas.addEventListener("click", () => canvas.focus());
+        canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+        loadGame();
+      })();
+    </script>
+  </body>
+</html>
