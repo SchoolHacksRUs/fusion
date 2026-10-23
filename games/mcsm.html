@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Minecraft: Story Mode</title>
+<link rel="icon" href="data:,">
+<style>
+@font-face{font-family:Rubik;src:url(https://raw.githubusercontent.com/thirstygithub/mcsmw/7b133b7/rubik.woff2) format("woff2");font-weight:300 900;font-display:block}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
+#canvas{--aspect:1.7777778;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(100vw,calc(100vh*var(--aspect)));height:min(100vh,calc(100vw/var(--aspect)));background:#000;display:block;outline:none;cursor:none}
+#start{--w:min(100vw,177.7778vh);--h:calc(var(--w)*.5625);position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;background:#6c8fdb url(https://raw.githubusercontent.com/thirstygithub/mcsmw/7b133b7/backdrop.jpg) center/cover no-repeat;color:#fff;font:500 18px Rubik,system-ui,sans-serif;cursor:pointer}
+#start:disabled{cursor:progress}
+#start.hidden{display:none}
+#logo{position:absolute;left:50%;top:calc(50% - var(--h)*.061);width:calc(var(--w)*.718);transform:translate(-50%,-50%);user-select:none;pointer-events:none}
+#status{position:absolute;left:0;right:0;top:calc(50% + var(--h)*.218 - .6em);margin:0 auto;width:max-content;max-width:92vw;font-size:max(15px,calc(var(--h)*.032));line-height:1.2;letter-spacing:.02em;text-align:center;text-shadow:0 2px 6px rgba(10,20,50,.75),0 0 2px rgba(10,20,50,.9)}
+#options{position:absolute;left:50%;bottom:5vh;transform:translateX(-50%);width:max-content;max-width:92vw;box-sizing:border-box;display:flex;flex-wrap:wrap;justify-content:center;gap:10px 18px;padding:12px 18px;border-radius:10px;background:rgba(10,14,24,.66);color:#c9d2e6;font:13px Rubik,system-ui,sans-serif;font-size:clamp(13px,1.6vh,20px)}
+#options.hidden{display:none}
+#options label{display:flex;flex-direction:column;gap:4px}
+#options select{background:#111;color:#ddd;border:1px solid #333;border-radius:4px;padding:5px 8px;font:inherit;cursor:pointer}
+#options select:disabled{color:#666;cursor:default}
+#load-hint{position:fixed;right:12px;bottom:12px;z-index:9998;padding:6px 10px;border-radius:6px;background:rgba(0,0,0,.7);color:#b8c4da;font:12px/1.35 ui-monospace,Menlo,Consolas,monospace;pointer-events:none;transition:opacity .35s ease;max-width:60vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#load-hint.hidden{opacity:0}
+</style>
+</head>
+<body>
+<canvas id="canvas" width="1920" height="1080" tabindex="0"></canvas>
+<button id="start" disabled><img id="logo" src="https://raw.githubusercontent.com/thirstygithub/mcsmw/7b133b7/logo.png" alt="Minecraft: Story Mode WASM Edition" draggable="false"><span id="status">Loading…</span></button>
+<div id="options">
+<label>Quality<select id="option-quality"></select></label>
+<label>Frame rate<select id="option-fps"><option value="60">60 fps</option><option value="uncapped">Unlimited</option></select></label>
+<label>Anti-aliasing<select id="option-aa"><option value="smooth">Smooth</option><option value="sharp">Sharp</option></select></label>
+<label>Shadows<select id="option-shadows"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
+<label>Multithreading<select id="option-threads"><option value="on">On</option><option value="off">Off</option></select></label>
+</div>
+<div id="load-hint">0/341</div>
+
+<script>
+window.__fmtBytes = function (n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + " MB";
+  return (n / 1024 / 1024 / 1024).toFixed(3) + " GB";
+};
+
+window.__loader = (function () {
+  const hint = document.getElementById("load-hint");
+  const t0 = performance.now();
+
+  function ts() { return ((performance.now() - t0) / 1000).toFixed(3).padStart(7, " ") + "s"; }
+
+  // Minimal loader interface — no debug panel, just the counter.
+  let dataPartCount = 0;
+  const DATA_TOTAL = 341;
+
+  return {
+    push(msg) { console.log(`[${ts()}] ${msg}`); },
+    partFetched(partName, from, to, bytes) {
+      if (partName.startsWith("game.data.part")) {
+        dataPartCount++;
+        hint.textContent = `${dataPartCount}/${DATA_TOTAL}`;
+        if (dataPartCount >= DATA_TOTAL) {
+          hint.classList.add("hidden");
+          setTimeout(() => hint.remove(), 400);
+        }
+      }
+    },
+    done() {
+      hint.classList.add("hidden");
+      setTimeout(() => hint.remove(), 400);
+    },
+    fail(msg) {
+      hint.textContent = "failed: " + msg;
+      hint.style.color = "#ff8a8a";
+    }
+  };
+})();
+
+window.addEventListener("error", (e) => {
+  console.error(`window.onerror: ${e.message} @ ${e.filename}:${e.lineno}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  console.error(`unhandledrejection: ${r && (r.stack || r.message) || r}`);
+});
+</script>
+
+<script>
+(function () {
+  const RETRY_DELAYS = [0, 500, 1500, 5000, 30000, 65000];
+  const RAW = "https://raw.githubusercontent.com/thirstygithub/mcsmw/7b133b7";
+  const L = window.__loader;
+  const fmtBytes = window.__fmtBytes;
+
+  const MANIFEST = {
+    "game.data": {
+      "partSize": 19922944,
+      "parts": (() => { const a = []; for (let i = 1; i <= 341; i++) a.push("game.data.part" + String(i).padStart(3, "0")); return a; })(),
+      "sizes": (() => { const a = []; for (let i = 0; i < 340; i++) a.push(19922944); a.push(13980320); return a; })(),
+      "type": "application/octet-stream"
+    },
+    "mcsm.wasm": {
+      "partSize": 19922944,
+      "parts": ["mcsm.wasm.part001", "mcsm.wasm.part002", "mcsm.wasm.part003"],
+      "sizes": [19922944, 19922944, 11514817],
+      "type": "application/wasm"
+    },
+    "mcsm_mt.wasm": {
+      "partSize": 19922944,
+      "parts": ["mcsm_mt.wasm.part001", "mcsm_mt.wasm.part002"],
+      "sizes": [19922944, 9620858],
+      "type": "application/wasm"
+    },
+    "mcsm_r4.wasm": {
+      "partSize": 19922944,
+      "parts": ["mcsm_r4.wasm.part001", "mcsm_r4.wasm.part002"],
+      "sizes": [19922944, 9804404],
+      "type": "application/wasm"
+    }
+  };
+
+  const blobUrls = {};
+
+  async function fetchWithRetry(url, retries = 6) {
+    let lastErr;
+    for (let attempt = 0; attempt < retries; attempt++) {
+      if (attempt > 0) {
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)]));
+      }
+      try {
+        const res = await fetch(url, { cache: attempt === 0 ? 'force-cache' : 'no-store' });
+        if (res.ok) return res;
+        lastErr = new Error(`HTTP ${res.status}`);
+        if (![403, 404, 429].includes(res.status) && res.status < 500) throw lastErr;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('fetch failed');
+  }
+
+  async function assembleWhole(name, entry) {
+    const pieces = [];
+    for (let i = 0; i < entry.parts.length; i++) {
+      const partName = entry.parts[i];
+      const url = `${RAW}/parts/${partName}`;
+      const res = await fetchWithRetry(url);
+      const buf = await res.arrayBuffer();
+      pieces.push(buf);
+      L.partFetched(partName, 0, buf.byteLength - 1, buf.byteLength);
+    }
+    const blob = new Blob(pieces, { type: entry.type });
+    console.log(`assembled ${name}: ${fmtBytes(blob.size)}`);
+    return URL.createObjectURL(blob);
+  }
+
+  async function assembleAll() {
+    for (const name of Object.keys(MANIFEST)) {
+      const entry = MANIFEST[name];
+      blobUrls[name] = await assembleWhole(name, entry);
+    }
+    console.log("all blobs ready");
+    patchFetch();
+  }
+
+  function patchFetch() {
+    const origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || String(input);
+      const base = String(url).split(/[?#]/)[0].split('/').pop();
+      if (blobUrls[base]) {
+        return origFetch(blobUrls[base], init);
+      }
+      return origFetch(input, init);
+    };
+    console.log("global fetch patched to serve blob URLs");
+  }
+
+  globalThis.__mcsmShim = {
+    install({ manifest, cdnBase, fileOrigin }) {
+      console.log(`shim.install cdnBase=${cdnBase}`);
+      const p = assembleAll();
+      p.catch(e => {
+        console.error(`assembly failed: ${e.message}`);
+        L.fail(e.message);
+      });
+      return p;
+    },
+    ready: null,
+    blobUrls,
+    manifest: MANIFEST
+  };
+})();
+</script>
+<script>
+window.__mcsmShim.ready = window.__mcsmShim.install({
+  manifest: window.__mcsmShim.manifest,
+  cdnBase: "https://raw.githubusercontent.com/thirstygithub/mcsmw/7b133b7/parts",
+  fileOrigin: ""
+});
+</script>
+<script>
+(function () {
+  const L = window.__loader;
+  const startBtn = document.getElementById("start");
+  const statusEl = document.getElementById("status");
+
+  let lastStatus = "";
+  let stableSince = performance.now();
+  const iv = setInterval(() => {
+    const txt = statusEl.textContent || "";
+    if (txt !== lastStatus) {
+      lastStatus = txt;
+      stableSince = performance.now();
+    }
+    if (!startBtn.disabled && performance.now() - stableSince > 600) {
+      clearInterval(iv);
+      L.done();
+    }
+  }, 200);
+})();
+</script>
+<script>
+(async function () {
+  const RAW = "https://raw.githubusercontent.com/thirstygithub/mcsmw/7b133b7/";
+  const scripts = ["quality.js", "filesystem.js", "audio.js", "loader.js"];
+
+  try {
+    await window.__mcsmShim.ready;
+    console.log("assembly done, loading engine scripts");
+
+    async function fetchAsJsBlobUrl(name) {
+      const url = RAW + name;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${name}`);
+      let text = await res.text();
+      if (text.charCodeAt(0) === 0x1f && text.charCodeAt(1) === 0x8b) {
+        const buf = Uint8Array.from(text, c => c.charCodeAt(0));
+        const ds = new DecompressionStream("gzip");
+        const w = ds.writable.getWriter();
+        w.write(buf);
+        w.close();
+        text = await new Response(ds.readable).text();
+      }
+      return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+    }
+
+    for (const name of scripts) {
+      const blobUrl = await fetchAsJsBlobUrl(name);
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = blobUrl;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error(`execution failed for ${name}`));
+        document.head.appendChild(s);
+      });
+      console.log(`executed ${name}`);
+    }
+    console.log("all engine scripts loaded");
+  } catch (e) {
+    console.error(`engine load aborted: ${e.message}`);
+    window.__loader.fail(e.message);
+  }
+})();
+</script>
+</body>
+</html>
