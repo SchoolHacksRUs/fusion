@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gamble With Your Friends — Solo</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#08070b;color:#fff;font:16px system-ui,sans-serif}
+#unity-canvas{display:block;position:absolute;width:min(100vw,177.7778vh);height:min(100vh,56.25vw);left:50%;top:50%;transform:translate(-50%,-50%);outline:none}
+#loading{position:fixed;inset:0;display:grid;place-content:center;text-align:center;gap:18px;background:#08070b}
+#loading h1{font-size:clamp(22px,4vw,36px);margin:0}#loading p{margin:0;color:#c7c1d2}
+progress{width:min(340px,80vw);height:10px;accent-color:#b600ff;justify-self:center}
+#error{max-width:650px;padding:20px;white-space:pre-wrap;color:#ffb8c6}
+</style>
+</head>
+<body>
+<canvas id="unity-canvas" tabindex="0" aria-label="Gamble With Your Friends solo game"></canvas>
+<div id="loading"><h1>Gamble With Your Friends</h1><p id="status">Loading solo game…</p><progress id="progress" max="1" value="0"></progress><div id="error" hidden></div></div>
+
+<script>
+// ============================================================
+//  1. Raw GitHub 基地址
+// ============================================================
+const RAW_BASE = "https://raw.githubusercontent.com/Camzzz-vrgt/gamble-with-your-friends-web/main/game/";
+
+// ============================================================
+//  2. 重写 fetch，让 StreamingAssets 等运行时请求走 raw GitHub
+// ============================================================
+const origFetch = window.fetch;
+window.fetch = function (input, init) {
+  let url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
+  // 如果请求是相对路径且不以 StreamingAssets/ 开头，也重写到 RAW_BASE
+  if (url && !/^(https?:|blob:|data:)/i.test(url)) {
+    url = RAW_BASE + url.replace(/^\.?\/+/, "");
+  }
+  if (typeof input === "string") input = url;
+  else if (input && input.url) input = new Request(url, input);
+  return origFetch.call(this, input, init);
+};
+
+// ============================================================
+//  3. 从原始 manifest 改写为绝对路径
+// ============================================================
+const manifest = {
+  loaderUrl: RAW_BASE + "Build/build.loader.js",
+  frameworkUrl: RAW_BASE + "Build/build.framework.js",
+  dataUrl: {
+    parts: Array.from({length: 50}, (_, i) => RAW_BASE + "chunks/build.data.part" + String(i + 1).padStart(3, "0")),
+    type: "application/octet-stream",
+    label: "build.data"
+  },
+  codeUrl: {
+    parts: Array.from({length: 19}, (_, i) => RAW_BASE + "chunks/build.wasm.part" + String(i + 1).padStart(3, "0")),
+    type: "application/wasm",
+    label: "build.wasm"
+  }
+};
+
+const objectUrls = [];
+const statusEl = document.getElementById("status");
+const progressEl = document.getElementById("progress");
+const errorEl = document.getElementById("error");
+
+// ============================================================
+//  4. 组装分片文件（带进度）
+// ============================================================
+async function assembleAsset(asset) {
+  if (typeof asset === "string") return asset;
+  const parts = [];
+  for (let i = 0; i < asset.parts.length; i++) {
+    const resp = await origFetch(asset.parts[i]);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${asset.parts[i]}`);
+    parts.push(await resp.blob());
+    statusEl.textContent = `Loading ${asset.label}… ${Math.round((i + 1) / asset.parts.length * 100)}%`;
+    progressEl.value = (i + 1) / asset.parts.length;
+  }
+  const url = URL.createObjectURL(new Blob(parts, { type: asset.type }));
+  objectUrls.push(url);
+  return url;
+}
+
+// ============================================================
+//  5. 将 JS 文件以 Blob 形式加载（绕过 raw GitHub 的 text/plain 限制）
+// ============================================================
+async function fetchJsAsBlobUrl(url) {
+  const resp = await origFetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
+  const text = await resp.text();
+  const blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+  objectUrls.push(blobUrl);
+  return blobUrl;
+}
+
+// ============================================================
+//  6. 启动游戏
+// ============================================================
+async function start() {
+  // 组装 data 和 wasm
+  const dataUrl = await assembleAsset(manifest.dataUrl);
+  const codeUrl = await assembleAsset(manifest.codeUrl);
+  // framework 也要以 Blob 形式加载
+  const frameworkUrl = await fetchJsAsBlobUrl(manifest.frameworkUrl);
+
+  const config = {
+    dataUrl,
+    frameworkUrl,
+    codeUrl,
+    streamingAssetsUrl: RAW_BASE + "StreamingAssets/",
+    companyName: "CamzzzWebPorts",
+    productName: "Gamble With Your Friends - Solo Web Port",
+    productVersion: "1.0",
+    devicePixelRatio: 1,
+    autoSyncPersistentDataPath: true,
+    showBanner: (msg, type) => console[type === "error" ? "error" : "warn"](msg)
+  };
+
+  // 加载 loader.js（以 Blob 形式）
+  statusEl.textContent = "Loading engine…";
+  const loaderUrl = await fetchJsAsBlobUrl(manifest.loaderUrl);
+  await new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = loaderUrl;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Failed to execute Unity loader blob."));
+    document.head.appendChild(script);
+  });
+
+  if (typeof createUnityInstance !== "function") {
+    throw new Error("createUnityInstance not defined — loader didn't initialize.");
+  }
+
+  statusEl.textContent = "Starting game…";
+  window.unityInstance = await createUnityInstance(canvas, config, (value) => {
+    progressEl.value = value;
+  });
+
+  document.getElementById("loading").remove();
+  canvas.focus();
+  objectUrls.forEach(url => URL.revokeObjectURL(url));
+}
+
+// ============================================================
+//  7. 错误处理与启动
+// ============================================================
+const canvas = document.getElementById("unity-canvas");
+canvas.addEventListener("pointerdown", () => canvas.focus());
+window.addEventListener("keydown", (e) => {
+  if (document.activeElement === canvas && ["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+});
+
+start().catch((err) => {
+  console.error(err);
+  statusEl.textContent = "The game could not start";
+  errorEl.hidden = false;
+  errorEl.textContent = err.message;
+});
+</script>
+</body>
+</html>
