@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Before Close</title>
+<style>
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#08090c;color:#fff;font-family:Arial,Helvetica,sans-serif}#game{position:fixed;inset:0;width:100%;height:100%;display:block;background:#08090c;outline:0}#screen{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:#08090c;transition:opacity .5s ease,visibility .5s ease}#screen.hide{opacity:0;visibility:hidden;pointer-events:none}.loading{width:min(600px,90vw);text-align:center}h1{font-size:clamp(30px,6vw,48px);font-weight:800;letter-spacing:.09em;margin:0 0 17px}#status{color:#a8acb9;font-size:13px;min-height:19px;margin-bottom:16px}#track{height:5px;background:#262a33;border-radius:10px;overflow:hidden}#bar{height:100%;width:0%;border-radius:10px;background:#fff;transition:width .2s ease}#pct{font-size:12px;color:#9ba0ab;margin-top:10px}#error{white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;line-height:1.5;color:#ff9c9c;font-size:12px;max-height:40vh;overflow:auto;margin-top:20px;background:#111;padding:10px;border-radius:6px;border:1px solid #333;display:none;font-family:monospace}#retry{display:none;margin:18px auto 0;padding:10px 24px;border:1px solid #555;background:#20222b;color:#fff;border-radius:7px;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="game" tabindex="-1"></canvas>
+<div id="screen">
+  <div class="loading">
+    <h1>BEFORE CLOSE</h1>
+    <div id="status">Connecting…</div>
+    <div id="track"><div id="bar"></div></div>
+    <div id="pct">0%</div>
+    <div id="error"></div>
+    <button id="retry">Retry</button>
+  </div>
+</div>
+
+<script>
+const RAW_BASE = "https://raw.githubusercontent.com/xxuep/before-close-webport/main/";
+const canvas = document.getElementById('game');
+const screen = document.getElementById('screen');
+const statusText = document.getElementById('status');
+const progress = document.getElementById('bar');
+const percent = document.getElementById('pct');
+const error = document.getElementById('error');
+const retry = document.getElementById('retry');
+
+let instance;
+let bootTimeout;
+
+function status(message) { statusText.textContent = message; }
+function failure(reason) {
+  status('Failed to load or crashed.');
+  error.textContent += "\n\n[FATAL ERROR]\n" + String(reason);
+  error.style.display = 'block';
+  retry.style.display = 'block';
+  screen.classList.remove('hide');
+}
+function logDebug(msg) {
+  error.textContent += String(msg) + "\n";
+  error.style.display = 'block';
+  error.scrollTop = error.scrollHeight;
+}
+
+window.addEventListener("error", e => logDebug("[Window Error]\n" + e.message));
+
+function getFileUrl(filename) {
+  return RAW_BASE + encodeURIComponent(filename);
+}
+
+// Fetch the loader script as text and make a Blob (raw GitHub sends JS as text/plain)
+async function loadLoaderScript(filename) {
+  const url = getFileUrl(filename);
+  logDebug("[Network] Fetching loader: " + filename);
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  const text = await res.text();
+  const blobUrl = URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
+  
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = blobUrl;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Failed to execute loader script"));
+    document.head.appendChild(script);
+  });
+}
+
+async function load() {
+  error.textContent = '';
+  retry.style.display = 'none';
+  progress.style.width = '0%';
+  percent.textContent = '0%';
+  
+  if (instance) {
+    try { await instance.Quit(); } catch(e) {}
+    instance = null;
+  }
+
+  try {
+    status('Loading Unity loader…');
+    await loadLoaderScript('before close web.loader.js');
+    
+    if (typeof createUnityInstance !== 'function') {
+      throw new Error('Unity loader did not register createUnityInstance');
+    }
+
+    status('Starting game…');
+    logDebug("[Network] Starting Unity engine boot...");
+    
+    // We pass the .unityweb URLs directly to Unity. The engine handles the
+    // Brotli/Gzip decompression internally on the C++ side!
+    const config = {
+      dataUrl: getFileUrl('before close web.data.unityweb'),
+      frameworkUrl: getFileUrl('before close web.framework.js.unityweb'),
+      codeUrl: getFileUrl('before close web.wasm.unityweb'),
+      streamingAssetsUrl: RAW_BASE + 'StreamingAssets',
+      companyName: 'Unity',
+      productName: 'Before Close',
+      productVersion: '1.0',
+      matchWebGLToCanvasSize: true,
+      print: (text) => {
+        console.log("[Unity]", text);
+        if (text.includes("Error") || text.includes("Exception") || text.includes("Failed")) {
+          logDebug("[Unity Log] " + text);
+        }
+      },
+      printErr: (text) => {
+        console.error("[Unity Err]", text);
+        logDebug("[Unity Error] " + text);
+      },
+      showBanner: (message, type) => {
+        if (type === 'error') logDebug("[Unity Banner Error] " + message);
+      }
+    };
+
+    const game = await createUnityInstance(canvas, config, (value) => {
+      const p = Math.max(0, Math.min(100, Math.floor(value * 100)));
+      progress.style.width = p + '%';
+      percent.textContent = p + '%';
+      
+      if (p >= 90 && !bootTimeout) {
+        status('Starting game…');
+        logDebug("[Unity] Reached 90%. Engine is compiling WASM and starting the first scene...");
+        
+        bootTimeout = setTimeout(() => {
+          logDebug("[Warning] The engine has been stuck at 90% for 15 seconds.");
+          failure("Timeout: Engine crashed or froze during startup. This is almost always a memory crash or missing SharedArrayBuffer support.");
+        }, 15000);
+      }
+    });
+
+    clearTimeout(bootTimeout);
+    instance = game;
+    progress.style.width = '100%';
+    percent.textContent = '100%';
+    status('Ready!');
+    screen.classList.add('hide');
+    canvas.focus();
+  } catch (e) {
+    console.error(e);
+    clearTimeout(bootTimeout);
+    failure(e.message || String(e));
+  }
+}
+
+retry.onclick = () => location.reload();
+load();
+</script>
+</body>
+</html>
