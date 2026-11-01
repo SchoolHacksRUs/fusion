@@ -1,214 +1,371 @@
 <!DOCTYPE html>
 <html lang="en-us">
-
 <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Unity WebGL Player | R.E.P.O</title>
-    <link rel="shortcut icon" href="https://raw.githubusercontent.com/genizy/web-port/main/repo/TemplateData/favicon.ico">
-    <link rel="stylesheet" href="https://raw.githubusercontent.com/genizy/web-port/main/repo/TemplateData/style.css">
-    <style>
-        html,
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            height: 100%;
-            width: 100%;
-            background: #000;
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>Unity WebGL Player | REPO</title>
+  <link rel="shortcut icon" href="https://raw.githubusercontent.com/Vanta-git/reo/main/TemplateData/favicon.ico">
+  
+  <style id="repu-shell">
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    body { position: fixed; inset: 0; font-family: sans-serif; }
+    
+    #unity-container,
+    #unity-container.unity-desktop {
+      position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+      transform: none; width: 100%; height: 100%;
+    }
+    
+    #unity-canvas { display: block; width: 100%; height: 100%; background: #000; }
+    
+    /* Unity default loader styles */
+    #unity-loading-bar {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+    }
+    #unity-logo {
+      width: 154px;
+      height: 130px;
+      background: url('https://raw.githubusercontent.com/Vanta-git/reo/main/TemplateData/unity-logo-dark.png') no-repeat center;
+      background-size: contain;
+    }
+    #unity-progress-bar-empty {
+      width: 141px;
+      height: 18px;
+      margin-top: 10px;
+      background: url('https://raw.githubusercontent.com/Vanta-git/reo/main/TemplateData/progress-bar-empty-dark.png') no-repeat center;
+      background-size: contain;
+    }
+    #unity-progress-bar-full {
+      width: 0%;
+      height: 18px;
+      background: url('https://raw.githubusercontent.com/Vanta-git/reo/main/TemplateData/progress-bar-full-dark.png') no-repeat center;
+      background-size: contain;
+    }
+    
+    #unity-footer { display: none; }
+    #unity-warning { max-width: 80vw; }
+  </style>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const RAW_BASE = "https://raw.githubusercontent.com/Vanta-git/reo/main/";
+      const BASE_DIR = RAW_BASE;
+      const MANIFEST_PATH = 'Build/chunks/manifest.json';
+      const PART_CONCURRENCY = 8;
+      const PART_ATTEMPTS = 4;
+      const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+      
+      let manifestPromise = null;
+      let started = false;
+      let instance = null;
+
+      function resolve(path) {
+        return new URL(path, BASE_DIR).href;
+      }
+
+      function banner(message) {
+        console.error('[repu] ' + message);
+        const host = document.querySelector('#unity-warning');
+        if (!host) return;
+        const line = document.createElement('div');
+        line.textContent = message;
+        line.style.cssText = 'background:#7f1d1d;color:#fff;padding:10px 14px;font:14px/1.4 system-ui,sans-serif;';
+        host.appendChild(line);
+        host.style.display = 'block';
+      }
+
+      function keyFor(input) {
+        let href = typeof input === 'string' ? input : input && input.url;
+        if (!href) return null;
+        try {
+          const url = new URL(href, BASE_DIR);
+          const base = new URL(BASE_DIR);
+          if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) return null;
+          return decodeURIComponent(url.pathname.slice(base.pathname.length)).replace(/^\/+/, '');
+        } catch (err) {
+          return null;
+        }
+      }
+
+      function loadManifest() {
+        if (!manifestPromise) {
+          manifestPromise = nativeFetch(resolve(MANIFEST_PATH), { cache: 'no-store' }).then(res => {
+            if (!res.ok) throw new Error('chunk manifest -> HTTP ' + res.status);
+            return res.json();
+          });
+          manifestPromise.catch(() => { manifestPromise = null; });
+        }
+        return manifestPromise;
+      }
+
+      function fetchPart(path, signal, attempt) {
+        return nativeFetch(resolve(path), { cache: 'default', signal }).then(res => {
+          if (!res.ok) {
+            const err = new Error('chunk part ' + path + ' -> HTTP ' + res.status);
+            err.retryable = res.status === 403 || res.status === 408 || res.status === 429 || res.status >= 500;
+            throw err;
+          }
+          return res.arrayBuffer();
+        }).catch(err => {
+          if (err.name === 'AbortError' || err.retryable === false || attempt >= PART_ATTEMPTS) throw err;
+          return new Promise(ready => setTimeout(ready, 250 * attempt * attempt)).then(() => fetchPart(path, signal, attempt + 1));
+        });
+      }
+
+      function partStream(entry) {
+        const parts = entry.parts;
+        const pending = [];
+        let started = 0;
+        let next = 0;
+        let begun = Date.now();
+        let finished = false;
+        const abort = new AbortController();
+
+        function fill() {
+          while (started < parts.length && started < next + PART_CONCURRENCY) {
+            pending[started] = fetchPart(parts[started], abort.signal, 1).then(buf => new Uint8Array(buf));
+            pending[started].catch(() => {});
+            started++;
+          }
         }
 
-        #unity-container {
-            width: 100%;
-            height: 100%;
-            position: fixed;
-            top: 0;
-            left: 0;
+        return new ReadableStream({
+          start: fill,
+          pull: function (controller) {
+            if (next >= parts.length) {
+              if (!finished) {
+                finished = true;
+                console.log('[repu] streamed ' + parts.length + ' parts in ' + ((Date.now() - begun) / 1000).toFixed(1) + ' s');
+              }
+              controller.close();
+              return undefined;
+            }
+            const index = next++;
+            fill();
+            return pending[index].then(bytes => {
+              pending[index] = null;
+              controller.enqueue(bytes);
+              fill();
+            }).catch(err => {
+              console.error('[repu] chunk stream failed:', err);
+              controller.error(err);
+            });
+          },
+          cancel: () => {
+            abort.abort();
+            pending.length = 0;
+          }
+        });
+      }
+
+      function chunkedResponse(entry) {
+        let stream = partStream(entry);
+        if (entry.encoding === 'gzip') {
+          stream = stream.pipeThrough(new DecompressionStream('gzip'));
+        }
+        const headers = new Headers();
+        headers.set('Content-Type', entry.type || 'application/octet-stream');
+        headers.set('Cache-Control', 'no-cache');
+        if (entry.decoded) {
+          headers.set('Content-Length', String(entry.decoded));
+        }
+        return new Response(stream, { status: 200, statusText: 'OK', headers });
+      }
+
+      function installFetchHook() {
+        if (!nativeFetch || window.__repuFetchHooked) return;
+        window.__repuFetchHooked = true;
+
+        window.fetch = function (input, init) {
+          const method = String((init && init.method) || 'GET').toUpperCase();
+          const key = (method === 'GET' || method === 'HEAD') ? keyFor(input) : null;
+          if (!key) return nativeFetch(input, init);
+          return loadManifest().then(manifest => {
+            const entry = manifest.files && manifest.files[key];
+            if (!entry) return nativeFetch(input, init);
+            if (method === 'HEAD') {
+              return new Response(null, { status: 200, headers: { 'Content-Type': entry.type || 'application/octet-stream' } });
+            }
+            return chunkedResponse(entry);
+          });
+        };
+      }
+
+      async function fetchJsAsBlobUrl(url) {
+        const res = await nativeFetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + url);
+        const text = await res.text();
+        return URL.createObjectURL(new Blob([text], { type: 'application/javascript' }));
+      }
+
+      async function prepareFramework(config) {
+        const url = resolve(config.frameworkUrl);
+        const res = await nativeFetch(url);
+        if (!res.ok) throw new Error('framework -> HTTP ' + res.status);
+        const buffer = await res.arrayBuffer();
+        const head = new Uint8Array(buffer, 0, 2);
+        
+        let text;
+        if (head[0] === 0x1f && head[1] === 0x8b) {
+          const ds = new DecompressionStream('gzip');
+          const writer = ds.writable.getWriter();
+          writer.write(new Uint8Array(buffer));
+          writer.close();
+          const outBuf = await new Response(ds.readable).arrayBuffer();
+          text = new TextDecoder().decode(outBuf);
+        } else {
+          text = new TextDecoder().decode(buffer);
+        }
+        config.frameworkUrl = URL.createObjectURL(new Blob([text], { type: 'application/javascript' }));
+      }
+
+      function resizeCanvas() {
+        if (!instance) return;
+        const canvas = document.querySelector('#unity-canvas');
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
+        const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+        if (canvas.width === w && canvas.height === h) return;
+        try {
+          instance.Module.setCanvasSize(w, h, true);
+        } catch (err) {
+          console.warn('[repu] resize failed:', err);
+        }
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+      }
+
+      window.repuOnInstanceReady = function (unityInstance) {
+        instance = unityInstance;
+        window.__repuInstance = unityInstance;
+        let pending = null;
+        window.addEventListener('resize', () => {
+          clearTimeout(pending);
+          pending = setTimeout(resizeCanvas, 120);
+        });
+        window.addEventListener('orientationchange', () => {
+          clearTimeout(pending);
+          pending = setTimeout(resizeCanvas, 300);
+        });
+        resizeCanvas();
+      };
+
+      window.repuStartPlayer = async function (config, boot) {
+        if (started) return;
+        started = true;
+
+        if (!nativeFetch || typeof DecompressionStream === 'undefined') {
+          banner('This browser cannot reassemble the split game data.');
+          return;
         }
 
-        #unity-canvas {
-            width: 100% !important;
-            height: 100% !important;
-            display: block;
-            background: #000;
+        installFetchHook();
+        try {
+          await loadManifest();
+          
+          const loaderRes = await nativeFetch(resolve(config.loaderUrl));
+          if (!loaderRes.ok) throw new Error('loader -> HTTP ' + loaderRes.status);
+          const loaderText = await loaderRes.text();
+          const loaderBlob = URL.createObjectURL(new Blob([loaderText], { type: 'application/javascript' }));
+          
+          await new Promise((resolveScript, rejectScript) => {
+            const script = document.createElement('script');
+            script.src = loaderBlob;
+            script.onload = resolveScript;
+            script.onerror = () => rejectScript(new Error('Failed to execute loader script'));
+            document.body.appendChild(script);
+          });
+
+          await prepareFramework(config);
+          boot();
+        } catch (err) {
+          banner('Could not load the game data (' + ((err && err.message) || err) + ').');
         }
-    </style>
+      };
+    })();
+  </script>
 </head>
 
 <body>
-    <div id="loading-text" style="color: black; font-family: cursive; font-size: 48px; text-align: center; margin-top: 20px;">LOADING...</div>
-    <div id="unity-container" class="unity-desktop" hidden>
-        <canvas id="unity-canvas" tabindex="-1"></canvas>
-        <div id="unity-loading-bar">
-            <div id="unity-logo"></div>
-            <div id="unity-progress-bar-empty">
-                <div id="unity-progress-bar-full"></div>
-            </div>
-        </div>
-        <div id="unity-warning"> </div>
+  <div id="unity-container" class="unity-desktop">
+    <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
+    <div id="unity-loading-bar">
+      <div id="unity-logo"></div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
     </div>
-    <script>
-        // -------------------------------------------------------------
-        //  Raw GitHub base. jsDelivr rejects genizy/web-port (many ports
-        //  exceed the total-size cap), so all assets come from raw GitHub.
-        // -------------------------------------------------------------
-        var REMOTE_BASE = "https://raw.githubusercontent.com/genizy/web-port/main/repo/";
+    <div id="unity-warning"></div>
+  </div>
 
-        // Intercept fetch so relative paths and any internal loader fetches
-        // resolve against raw GitHub.
-        var _origFetch = window.fetch;
-        window.fetch = function (input, init) {
-            var url = typeof input === "string" ? input : (input && input.url ? input.url : String(input));
-            if (url && url.indexOf('http') !== 0 && url.indexOf('blob:') !== 0 && url.indexOf('data:') !== 0) {
-                url = REMOTE_BASE + url.replace(/^\.?\/+/, "");
-            }
-            if (input && input.url && url !== input.url) input = new Request(url, input);
-            else if (typeof input === 'string') input = url;
-            return _origFetch.call(this, input, init);
-        };
+  <script>
+    const canvas = document.querySelector("#unity-canvas");
+    const loadingBar = document.querySelector("#unity-loading-bar");
+    const progressBarFull = document.querySelector("#unity-progress-bar-full");
+    const warningBanner = document.querySelector("#unity-warning");
 
-        // Load a JS file as a blob with the correct MIME type.
-        // Raw GitHub serves .js as text/plain, which browsers refuse to
-        // execute as <script src> and Unity refuses to use as a framework.
-        async function fetchAsJsBlob(url) {
-            var r = await fetch(url);
-            if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
-            var text = await r.text();
-            return URL.createObjectURL(new Blob([text], { type: "application/javascript" }));
-        }
+    function unityShowBanner(msg, type) {
+      function updateBannerVisibility() {
+        warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
+      }
+      const div = document.createElement('div');
+      div.innerHTML = msg;
+      warningBanner.appendChild(div);
+      if (type == 'error') div.style = 'background: red; padding: 10px;';
+      else {
+        if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
+        setTimeout(() => {
+          warningBanner.removeChild(div);
+          updateBannerVisibility();
+        }, 5000);
+      }
+      updateBannerVisibility();
+    }
 
-        function loadScriptAsBlob(url) {
-            return new Promise(function (resolve, reject) {
-                fetchAsJsBlob(url).then(function (blobUrl) {
-                    var s = document.createElement("script");
-                    s.src = blobUrl;
-                    s.onload = resolve;
-                    s.onerror = function () { reject(new Error("Failed to execute " + url)); };
-                    document.head.appendChild(s);
-                }).catch(reject);
-            });
-        }
+    const config = {
+      loaderUrl: "Build/123.loader.js",
+      dataUrl: "Build/123.data.gz",
+      frameworkUrl: "Build/123.framework.js.gz",
+      codeUrl: "Build/123.wasm.gz",
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: "semiwork",
+      productName: "REPO",
+      productVersion: "0.1",
+      showBanner: unityShowBanner,
+      cacheControl: function (url) {
+        return url.indexOf(".bundle") >= 0 ? "must-revalidate" : "no-store";
+      },
+    };
 
-        var container = document.querySelector("#unity-container");
-        var canvas = document.querySelector("#unity-canvas");
-        var loadingBar = document.querySelector("#unity-loading-bar");
-        var progressBarFull = document.querySelector("#unity-progress-bar-full");
-        var fullscreenButton = document.querySelector("#unity-fullscreen-button");
-        var warningBanner = document.querySelector("#unity-warning");
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+      const meta = document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
+      document.getElementsByTagName('head')[0].appendChild(meta);
+    }
 
-        function unityShowBanner(msg, type) {
-            function updateBannerVisibility() {
-                warningBanner.style.display = warningBanner.children.length ? 'block' : 'none';
-            }
-            var div = document.createElement('div');
-            div.innerHTML = msg;
-            warningBanner.appendChild(div);
-            if (type == 'error') div.style = 'background: red; padding: 10px;';
-            else {
-                if (type == 'warning') div.style = 'background: yellow; padding: 10px;';
-                setTimeout(function () {
-                    warningBanner.removeChild(div);
-                    updateBannerVisibility();
-                }, 5000);
-            }
-            updateBannerVisibility();
-        }
+    loadingBar.style.display = "flex";
 
-        function mergeFiles(fileParts, mimeType) {
-            return new Promise((resolve, reject) => {
-                let buffers = [];
-
-                function fetchPart(index) {
-                    if (index >= fileParts.length) {
-                        let mergedBlob = new Blob(buffers, { type: mimeType });
-                        resolve(URL.createObjectURL(mergedBlob));
-                        return;
-                    }
-                    fetch(fileParts[index]).then((response) => {
-                        if (!response.ok) throw new Error("HTTP " + response.status + " for " + fileParts[index]);
-                        return response.arrayBuffer();
-                    }).then((data) => {
-                        buffers.push(data);
-                        fetchPart(index + 1);
-                    }).catch(reject);
-                }
-                fetchPart(0);
-            });
-        }
-
-        function getParts(file, start, end) {
-            let parts = [];
-            for (let i = start; i <= end; i++) {
-                parts.push(REMOTE_BASE + file + ".part" + i);
-            }
-            return parts;
-        }
-
-        (async function () {
-            try {
-                loadingBar.style.display = "block";
-
-                const [wasmUrl, dataUrl] = await Promise.all([
-                    mergeFiles(getParts("Build/NewestBuild.wasm.gz", 1, 3), "application/wasm"),
-                    mergeFiles(getParts("Build/NewestBuild.data.gz", 1, 16), "application/octet-stream")
-                ]);
-
-                container.hidden = false;
-                var buildUrl = REMOTE_BASE + "Build";
-                var loaderUrl = buildUrl + "/NewestBuild.loader.js";
-
-                // Framework as a blob (raw GitHub's text/plain MIME blocks it).
-                var frameworkBlobUrl = await fetchAsJsBlob(buildUrl + "/NewestBuild.framework.js");
-
-                var config = {
-                    dataUrl: dataUrl,
-                    frameworkUrl: frameworkBlobUrl,
-                    codeUrl: wasmUrl,
-                    streamingAssetsUrl: REMOTE_BASE + "StreamingAssets",
-                    companyName: "Stupid Game",
-                    productName: "R.E.P.O",
-                    productVersion: "0.1",
-                    showBanner: unityShowBanner
-                };
-
-                if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-                    var meta = document.createElement('meta');
-                    meta.name = 'viewport';
-                    meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
-                    document.getElementsByTagName('head')[0].appendChild(meta);
-                    container.className = "unity-mobile";
-                    canvas.className = "unity-mobile";
-                } else {
-                    function resizeCanvas() {
-                        canvas.width = window.innerWidth;
-                        canvas.height = window.innerHeight;
-                        canvas.style.width = window.innerWidth + "px";
-                        canvas.style.height = window.innerHeight + "px";
-                    }
-                    resizeCanvas();
-                    window.addEventListener('resize', resizeCanvas);
-                }
-
-                await loadScriptAsBlob(loaderUrl);
-
-                createUnityInstance(canvas, config, (progress) => {
-                    progressBarFull.style.width = 100 * progress + "%";
-                }).then((unityInstance) => {
-                    loadingBar.style.display = "none";
-                    var lt = document.querySelector("#loading-text");
-                    if (lt) lt.remove();
-                }).catch((message) => {
-                    console.error(message);
-                    var lt = document.querySelector("#loading-text");
-                    if (lt) lt.textContent = "FAILED: " + message;
-                });
-            } catch (err) {
-                console.error(err);
-                var lt = document.querySelector("#loading-text");
-                if (lt) lt.textContent = "FAILED: " + (err && err.message ? err.message : err);
-            }
-        })();
-    </script>
+    window.repuStartPlayer(config, function () {
+      createUnityInstance(canvas, config, (progress) => {
+        progressBarFull.style.width = 100 * progress + "%";
+      }).then((unityInstance) => {
+        loadingBar.style.display = "none";
+        window.__repuInstance = unityInstance;
+        if (window.repuOnInstanceReady) window.repuOnInstanceReady(unityInstance);
+      }).catch((message) => {
+        alert(message);
+      });
+    });
+  </script>
 </body>
-
 </html>
