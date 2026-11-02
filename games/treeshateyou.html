@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <title>Trees Hate You</title>
+  <style>
+    body { background: #000; margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    #unity-canvas { width: 100vw; height: 100vh; display: block; }
+    #loading-screen { 
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+      background: #111; display: flex; flex-direction: column; 
+      justify-content: center; align-items: center; color: white; z-index: 10;
+    }
+    #loading-text { font-size: 24px; margin-bottom: 20px; font-weight: normal; }
+    #progress-container { width: 300px; height: 10px; background: #333; border-radius: 5px; overflow: hidden; }
+    #progress-bar { width: 0%; height: 100%; background: #007bff; transition: width 0.2s; }
+  </style>
+</head>
+<body>
+  <div id="loading-screen">
+    <div id="loading-text">Loading... 0%</div>
+    <div id="progress-container"><div id="progress-bar"></div></div>
+  </div>
+  <canvas id="unity-canvas" tabindex="-1"></canvas>
+  
+  <script>
+    const REPO_URL = "https://raw.githubusercontent.com/thirstygithub/fugglelatougin/main/Build/";
+
+    const canvas = document.querySelector("#unity-canvas");
+    const loadingScreen = document.querySelector("#loading-screen");
+    const loadingText = document.querySelector("#loading-text");
+    const progressBar = document.querySelector("#progress-bar");
+
+    function updateProgress(text, percent) {
+      if (text) loadingText.innerText = text;
+      if (percent !== null) progressBar.style.width = percent + "%";
+    }
+
+    async function fetchChunks(filename, numChunks) {
+      const buffers = [];
+      let total = 0;
+      for (let i = 0; i < numChunks; i++) {
+        updateProgress(`Downloading ${filename}... (${i+1}/${numChunks})`, (i / numChunks) * 100);
+        const res = await fetch(`${REPO_URL}${filename}.part${i}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`Failed to download ${filename}.part${i} (status ${res.status})`);
+        const buf = new Uint8Array(await res.arrayBuffer());
+        if (buf.length === 0) throw new Error(`${filename}.part${i} is empty`);
+        buffers.push(buf);
+        total += buf.length;
+      }
+      const combined = new Uint8Array(total);
+      let offset = 0;
+      for (const b of buffers) { combined.set(b, offset); offset += b.length; }
+      return combined;
+    }
+
+    function blobUrl(bytes, type) {
+      return URL.createObjectURL(new Blob([bytes], { type }));
+    }
+
+    // Fetch a .js file as text and run it as a blob URL (raw.githubusercontent serves JS as text/plain)
+    async function loadScriptAsBlob(url) {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Failed to download ${url} (status ${res.status})`);
+      const text = await res.text();
+      const blob = new Blob([text], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = blobUrl;
+        s.onload = () => { URL.revokeObjectURL(blobUrl); resolve(); };
+        s.onerror = () => { URL.revokeObjectURL(blobUrl); reject(new Error(`Script failed: ${url}`)); };
+        document.body.appendChild(s);
+      });
+    }
+
+    async function loadGame() {
+      try {
+        updateProgress("Downloading data...", 10);
+        const data = await fetchChunks("TreesHateYou_Web.data.br", 5);
+        const dataUrl = blobUrl(data);
+
+        updateProgress("Downloading framework...", 40);
+        const fwRes = await fetch(`${REPO_URL}TreesHateYou_Web.framework.js.br`, { cache: "no-store" });
+        if (!fwRes.ok) throw new Error(`Failed to download framework (status ${fwRes.status})`);
+        const fw = new Uint8Array(await fwRes.arrayBuffer());
+        const fwUrl = blobUrl(fw, "application/javascript");
+
+        updateProgress("Downloading WebAssembly...", 50);
+        const wasm = await fetchChunks("TreesHateYou_Web.wasm.br", 4);
+        const wasmUrl = blobUrl(wasm, "application/wasm");
+
+        const config = {
+          dataUrl,
+          frameworkUrl: fwUrl,
+          codeUrl: wasmUrl,
+          companyName: "tykenn games",
+          productName: "Trees Hate You",
+          productVersion: "0.1.0",
+        };
+
+        updateProgress("Loading loader...", 90);
+        await loadScriptAsBlob(`${REPO_URL}TreesHateYou_Web.loader.js`);
+
+        if (typeof window.createUnityInstance !== "function") {
+          throw new Error("loader.js ran but createUnityInstance is not defined");
+        }
+
+        updateProgress("Initializing engine...", 95);
+        createUnityInstance(canvas, config, (p) => {
+          updateProgress(`Loading... ${Math.round(p * 100)}%`, 90 + p * 10);
+        }).then(() => { loadingScreen.style.display = "none"; })
+          .catch(err => updateProgress("Engine error: " + (err.message || err), null));
+      } catch (err) {
+        updateProgress("Error: " + (err.message || err), null);
+        console.error(err);
+      }
+    }
+
+    loadGame();
+  </script>
+</body>
+</html>
